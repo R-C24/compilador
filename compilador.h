@@ -1,0 +1,51 @@
+#ifndef COMPILADOR_H
+#define COMPILADOR_H
+
+#define MaxMacros 100
+#define MaxNombre 64
+#define MaxValor 256
+#define TamBuffer 1024
+
+typedef struct Macro Macro;
+struct Macro{
+    char nombre[MaxNombre];
+    char valor[MaxValor];
+};
+
+extern Macro macros[MaxMacros];
+extern int totalMacros = 0;
+
+void agregarMacro(char *nombre, char *valor);
+void traducirMacros(char *linea);
+void procesarArchivo(char *nombreArchivo, FILE *f_out);
+
+// -------------Tokens-------------
+
+typedef enum {
+    TokenEOF = 0,
+    TokenPalabraReservada,
+    TokenID,
+    TokenInt,
+    TokenFloat,
+    TokenString,
+    TokenChar,
+    TokenOp,
+    TokenSeparador,
+    TokenError
+} TipoToken;
+
+typedef struct Token Token;
+struct Token{
+    TipoToken tipo;
+    char *lexema;
+    double valor;
+    int numLinea;
+    int numColumna;
+};
+
+Token getToken();
+char* obtenerNombreToken(TipoToken tipo);
+
+extern FILE *yyin;
+
+#endif //COMPILADOR_H
