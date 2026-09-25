@@ -27,9 +27,10 @@ typedef enum {
     TokenID,
     TokenInt,
     TokenFloat,
-    TokenString,
     TokenChar,
     TokenOp,
+    TokenString,
+    TokenModificador,
     TokenSeparador,
     TokenError
 } TipoToken;

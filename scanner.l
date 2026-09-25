@@ -32,8 +32,8 @@ DIGITO        [0-9]
 LETRA         [a-zA-Z_]
 HEX           [0-9a-fA-F]
 ID            {LETRA}({LETRA}|{DIGITO})*
-INT           {DIGITO}+|0[xX]{HEX}+
-FLOAT         {DIGITO}+\.{DIGITO}+([eE][+-]?{DIGITO}+)?|{DIGITO}+[eE][+-]?{DIGITO}+
+INT           {DIGITO}+[uU]?[lL]{0,2}|0[xX]{HEX}+[uU]?[lL]{0,2}
+FLOAT         ({DIGITO}+\.{DIGITO}*|\.{DIGITO}+)([eE][+-]?{DIGITO}+)?[fFlL]?|{DIGITO}+[eE][+-]?{DIGITO}+[fFlL]?
 STRING        \"([^\"\n\\]|\\.)*\"
 CHAR          \'([^\'\n\\]|\\.)*\'
 
@@ -46,7 +46,7 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 [ \t\r]+
 
 
-{LINEACOMENTARIO }   {  }
+{LINEACOMENTARIO}   {  }
 {BLOQUECOMENTARIO}  {
                     for(int i = 0; yytext[i] != '\0'; i++) {
                         if(yytext[i] == '\n') {
@@ -60,7 +60,7 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 "auto"|"break"|"case"|"char"|"const"|"continue"|"default"|"do"|"double"|"else"|"enum"|"extern"|"float"|"for"|"goto"|"if"|"int"|"long"|"register"|"return"|"short"|"signed"|"sizeof"|"static"|"struct"|"switch"|"typedef"|"union"|"unsigned"|"void"|"volatile"|"while"  { return (tokenAct = crearToken(TokenPalabraReservada, 0)).tipo; }
 
 /* Literales */
-{INT}     { return (tokenAct = crearToken(TokenInt, strtol(yytext, NULL, 0))).tipo; }
+{INT}     { return (tokenAct = crearToken(TokenInt, (double)strtol(yytext, NULL, 0))).tipo; }
 {FLOAT}   { return (tokenAct = crearToken(TokenFloat, atof(yytext))).tipo; }
 {STRING}  { return (tokenAct = crearToken(TokenString, 0)).tipo; }
 {CHAR}    { return (tokenAct = crearToken(TokenChar, (double)yytext[1])).tipo; }
@@ -69,13 +69,13 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 {ID} { return (tokenAct = crearToken(TokenID, 0)).tipo; }
 
 /* Operadores*/
-"=="|"!="|"<="|">="|"&&"|"||"|"<<"|">>"|"++"|"--"|"+="|"-="|"*="|"/="|"%="|"->"|"+"|"-"|"*"|"/"|"%"|"="|"<"|">"|"!"|"&"|"|"|"^"|"~"|"?"  { return (tokenAct = crearToken(TokenOp, 0)).tipo; }
+"<<"="|">>="|"=="|"!="|"<="|">="|"&&"|"||"|"<<"|">>"|"++"|"--"|"+="|"-="|"*="|"/="|"%="|"&="|"^="|"\x7c="|"->"|"+"|"-"|"*"|"/"|"%"|"="|"<"|">"|"!"|"&"|"\x7c"|"^"|"~"|"?"  { return (tokenAct = crearToken(TokenOp, 0)).tipo; }
 
 
 /* Delimitadores */
-";"|","|"."|"{"|"}"|"("|")"|"["|"]" { return (tokenActual = crearToken(TokenSeparador, 0)).tipo; }
+";"|","|"."|"{"|"}"|"("|")"|"["|"]" { return (tokenAct = crearToken(TokenSeparador, 0)).tipo; }
 
-.  { return (tokenActual = crearToken(TokenError, 0)).tipo; }
+.  { return (tokenAct = crearToken(TokenError, 0)).tipo; }
 
 %%
 

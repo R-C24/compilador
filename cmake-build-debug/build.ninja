@@ -55,6 +55,12 @@ build CMakeFiles/compilador.dir/main.c.obj: C_COMPILER__compilador_unscanned_Deb
   OBJECT_DIR = CMakeFiles\compilador.dir
   OBJECT_FILE_DIR = CMakeFiles\compilador.dir
 
+build CMakeFiles/compilador.dir/prueba.c.obj: C_COMPILER__compilador_unscanned_Debug C$:/Users/Dayana/CLionProjects/compilador/prueba.c || cmake_object_order_depends_target_compilador
+  DEP_FILE = CMakeFiles\compilador.dir\prueba.c.obj.d
+  FLAGS = -g -std=gnu11 -fdiagnostics-color=always
+  OBJECT_DIR = CMakeFiles\compilador.dir
+  OBJECT_FILE_DIR = CMakeFiles\compilador.dir
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target compilador
@@ -63,7 +69,7 @@ build CMakeFiles/compilador.dir/main.c.obj: C_COMPILER__compilador_unscanned_Deb
 #############################################
 # Link the executable compilador.exe
 
-build compilador.exe: C_EXECUTABLE_LINKER__compilador_Debug CMakeFiles/compilador.dir/main.c.obj
+build compilador.exe: C_EXECUTABLE_LINKER__compilador_Debug CMakeFiles/compilador.dir/main.c.obj CMakeFiles/compilador.dir/prueba.c.obj
   FLAGS = -g
   LINK_LIBRARIES = -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
   OBJECT_DIR = CMakeFiles\compilador.dir
