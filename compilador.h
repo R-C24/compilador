@@ -13,7 +13,7 @@ struct Macro{
 };
 
 extern Macro macros[MaxMacros];
-extern int totalMacros = 0;
+extern int totalMacros;
 
 void agregarMacro(char *nombre, char *valor);
 void traducirMacros(char *linea);
@@ -47,6 +47,5 @@ struct Token{
 Token getToken();
 char* obtenerNombreToken(TipoToken tipo);
 
-extern FILE *yyin;
 
 #endif //COMPILADOR_H

@@ -1,3 +1,3 @@
-C:/Users/Dayana/CLionProjects/compilador/cmake-build-debug/CMakeFiles/compilador.dir
-C:/Users/Dayana/CLionProjects/compilador/cmake-build-debug/CMakeFiles/edit_cache.dir
-C:/Users/Dayana/CLionProjects/compilador/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/home/dayana/CLionProjects/compilador/cmake-build-debug/CMakeFiles/compilador.dir
+/home/dayana/CLionProjects/compilador/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/dayana/CLionProjects/compilador/cmake-build-debug/CMakeFiles/rebuild_cache.dir

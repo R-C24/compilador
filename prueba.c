@@ -11,7 +11,7 @@ int main() {
     char @caracter_invalido = '$';
 
     if (contador < MAX) {
-        contador = contador + 1;
+        contador = <contador + 1;
     }
 
     return 0;

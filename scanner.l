@@ -16,18 +16,18 @@ Token tokenAct;
 
 Token crearToken(TipoToken tipo, double valor) {
     Token token;
-    t.tipo = tipo;
-    t.lexema = strdup(yytext);
-    t.valor = valor;
-    t.linea = lineaAct;
-    t.columna = columnaAct - yyleng;
+    token.tipo = tipo;
+    token.lexema = strdup(yytext);
+    token.valor = valor;
+    token.numLinea = lineaAct;
+    token.numColumna = columnaAct - yyleng;
     return token;
 }
 %}
 
 %option noyywrap
 
-/* Expresiones Regulares*/
+    /* Expresiones Regulares*/
 DIGITO        [0-9]
 LETRA         [a-zA-Z_]
 HEX           [0-9a-fA-F]
@@ -56,24 +56,24 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
                     }
                  }
 
-/* Palabras Reservadas*/
+    /* Palabras Reservadas*/
 "auto"|"break"|"case"|"char"|"const"|"continue"|"default"|"do"|"double"|"else"|"enum"|"extern"|"float"|"for"|"goto"|"if"|"int"|"long"|"register"|"return"|"short"|"signed"|"sizeof"|"static"|"struct"|"switch"|"typedef"|"union"|"unsigned"|"void"|"volatile"|"while"  { return (tokenAct = crearToken(TokenPalabraReservada, 0)).tipo; }
 
-/* Literales */
-{INT}     { return (tokenAct = crearToken(TokenInt, (double)strtol(yytext, NULL, 0))).tipo; }
-{FLOAT}   { return (tokenAct = crearToken(TokenFloat, atof(yytext))).tipo; }
-{STRING}  { return (tokenAct = crearToken(TokenString, 0)).tipo; }
-{CHAR}    { return (tokenAct = crearToken(TokenChar, (double)yytext[1])).tipo; }
+    /* Literales */
+{INT}     { return (tokenAct = crearToken(TokenInt, (double)strtol(yytext, NULL, 0))).tipo;}
+{FLOAT}   { return (tokenAct = crearToken(TokenFloat, atof(yytext))).tipo;}
+{STRING}  { return (tokenAct = crearToken(TokenString, 0)).tipo;}
+{CHAR}    { return (tokenAct = crearToken(TokenChar, (double)yytext[1])).tipo;}
 
-/* Identificadores */
+    /* Identificadores*/
 {ID} { return (tokenAct = crearToken(TokenID, 0)).tipo; }
 
-/* Operadores*/
-"<<"="|">>="|"=="|"!="|"<="|">="|"&&"|"||"|"<<"|">>"|"++"|"--"|"+="|"-="|"*="|"/="|"%="|"&="|"^="|"\x7c="|"->"|"+"|"-"|"*"|"/"|"%"|"="|"<"|">"|"!"|"&"|"\x7c"|"^"|"~"|"?"  { return (tokenAct = crearToken(TokenOp, 0)).tipo; }
+    /* Operadores*/
+"<<="|">>="|"=="|"!="|"<="|">="|"&&"|"||"|"<<"|">>"|"++"|"--"|"+="|"-="|"*="|"/="|"%="|"&="|"^="|"\|="|"->"|"+"|"-"|"*"|"/"|"%"|"="|"<"|">"|"!"|"&"|"\|"|"^"|"~"|"?"  { return (tokenAct = crearToken(TokenOp, 0)).tipo; }
 
 
-/* Delimitadores */
-";"|","|"."|"{"|"}"|"("|")"|"["|"]" { return (tokenAct = crearToken(TokenSeparador, 0)).tipo; }
+    /* Delimitadores*/
+";"|","|"."|"{"|"}"|"("|")"|"["|"]"|"#" { return (tokenAct = crearToken(TokenSeparador, 0)).tipo; }
 
 .  { return (tokenAct = crearToken(TokenError, 0)).tipo; }
 
@@ -86,8 +86,8 @@ Token getToken() {
         eofToken.tipo = TokenEOF;
         eofToken.lexema = "EOF";
         eofToken.valor = 0;
-        eofToken.linea = lineaAct;
-        eofToken.columna = columnaAct;
+        eofToken.numLinea = lineaAct;
+        eofToken.numColumna = columnaAct;
         return eofToken;
     }
     return tokenAct;

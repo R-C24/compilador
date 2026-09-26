@@ -8,7 +8,7 @@
 Macro macros[MaxMacros];
 int totalMacros = 0;
 
-FILE *yyin;
+extern FILE *yyin;
 
 int main(int argc, char *argv[]) {
     int opt;
@@ -16,7 +16,7 @@ int main(int argc, char *argv[]) {
     char *archivoFuente = NULL;
     char *archivoSalida = NULL;
 
-    while ((opt = getopt(argc, argv, "po:"))) {
+    while ((opt = getopt(argc, argv, "po:")) != -1) {
         switch (opt) {
             case 'p':
                 activarPreproceso = 1;
@@ -87,19 +87,19 @@ int main(int argc, char *argv[]) {
             switch (token.tipo) {
                 case TokenPalabraReservada:
                     stats.palabrasReservadas++;
-                break;
+                    break;
                 case TokenID:
                     stats.identificadores++;
-                break;
+                    break;
                 case TokenInt | TokenFloat:
                     stats.num++;
-                break;
+                    break;
                 case TokenOp:
                     stats.operadores++;
-                break;
+                    break;
                 case TokenSeparador:
                     stats.separadores++;
-                break;
+                    break;
                 case TokenError:
                     stats.erroresLexicos++;
                 if (cantErrores < MaxErrores) {
@@ -225,13 +225,14 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
 
     // Prólogo de LaTeX y definición de colores y estilos
     fprintf(f, "\\documentclass{beamer}\n");
-    fprintf(f, "\\usepackage[utf8]{utf8}\n");
+    //fprintf(f, "\\usepackage[utf8]{utf8}\n");
     fprintf(f, "\\usepackage[spanish]{babel}\n");
     fprintf(f, "\\usepackage{pgfplots}\n");
     fprintf(f, "\\usepackage{booktabs}\n");
     fprintf(f, "\\usepackage{xcolor}\n");
+    fprintf(f, "\\usepackage{amssymb}\n");
     fprintf(f, "\\pgfplotsset{compat=1.18}\n\n");
-
+    
     fprintf(f, "\\usetheme{Madrid}\n");
     fprintf(f, "\\usecolortheme{whale}\n\n");
 
@@ -263,13 +264,13 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     fprintf(f, "      \\toprule\n");
     fprintf(f, "      \\textbf{Categoría} & \\textbf{Estilo Visual} & \\textbf{Cantidad} \\\\\n");
     fprintf(f, "      \\midrule\n");
-    fprintf(f, "      Palabras Reservadas & \\textcolor{ColorKeyword}{\\blacksquare~Keyword} & %d \\\\\n", stats->palabrasReservadas);
-    fprintf(f, "      Identificadores     & \\textcolor{ColorId}{\\blacksquare~Identifier} & %d \\\\\n", stats->identificadores);
-    fprintf(f, "      Constantes          & \\textcolor{ColorConst}{\\blacksquare~Constant} & %d \\\\\n", stats->num);
-    fprintf(f, "      Operadores          & \\textcolor{ColorOp}{\\blacksquare~Operator} & %d \\\\\n", stats->operadores);
-    fprintf(f, "      Separadores       & \\textcolor{ColorDelim}{\\blacksquare~Delimiter} & %d \\\\\n", stats->separadores);
+    fprintf(f, "      Palabras Reservadas & \\textcolor{ColorKeyword}{$\blacksquare$~Keyword} & %d \\\\\n", stats->palabrasReservadas);
+    fprintf(f, "      Identificadores     & \\textcolor{ColorId}{$\blacksquare$~Identifier} & %d \\\\\n", stats->identificadores);
+    fprintf(f, "      Constantes          & \\textcolor{ColorConst}{$\blacksquare$~Constant} & %d \\\\\n", stats->num);
+    fprintf(f, "      Operadores          & \\textcolor{ColorOp}{$\blacksquare$~Operator} & %d \\\\\n", stats->operadores);
+    fprintf(f, "      Separadores       & \\textcolor{ColorDelim}{$\blacksquare$~Delimiter} & %d \\\\\n", stats->separadores);
     fprintf(f, "      \\midrule\n");
-    fprintf(f, "      \\textbf{Errores Léxicos} & \\textcolor{ColorError}{\\blacksquare~Lexical Error} & \\textbf{%d} \\\\\n", stats->erroresLexicos);
+    fprintf(f, "      \\textbf{Errores Léxicos} & \\textcolor{ColorError}{$\blacksquare$~Lexical Error} & \\textbf{%d} \\\\\n", stats->erroresLexicos);
     fprintf(f, "      \\bottomrule\n");
     fprintf(f, "    \\end{tabular}\n");
     fprintf(f, "  \\end{center}\n");
