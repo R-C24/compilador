@@ -47,5 +47,7 @@ struct Token{
 Token getToken();
 char* obtenerNombreToken(TipoToken tipo);
 
+void formatearLexema(FILE *f_tex, int tipoToken, const char *lexema);
+void dividirCodigoSlides(FILE *f_tex);
 
 #endif //COMPILADOR_H

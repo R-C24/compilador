@@ -9,12 +9,13 @@ Macro macros[MaxMacros];
 int totalMacros = 0;
 
 extern FILE *yyin;
+extern void yyrestart(FILE *new_file);
 
 int main(int argc, char *argv[]) {
     int opt;
     int activarPreproceso = 1; // El preproceso está activado por defecto.
     char *archivoFuente = NULL;
-    char *archivoSalida = NULL;
+    char *archivoSalida = "salidaPresentacion.tex";
 
     while ((opt = getopt(argc, argv, "po:")) != -1) {
         switch (opt) {
@@ -91,7 +92,10 @@ int main(int argc, char *argv[]) {
                 case TokenID:
                     stats.identificadores++;
                     break;
-                case TokenInt | TokenFloat:
+                case TokenInt:
+                    stats.num++;
+                    break;
+                case TokenFloat:
                     stats.num++;
                     break;
                 case TokenOp:
@@ -127,6 +131,21 @@ int main(int argc, char *argv[]) {
 
     char *nombreBeamer = archivoSalida ? archivoSalida : "salidaPresentacion.tex";
     generarBeamer(nombreBeamer, &stats, errores, cantErrores);
+
+    char archivoPDF[256];
+    strncpy(archivoPDF, nombreBeamer, sizeof(archivoPDF) - 1);
+    archivoPDF[sizeof(archivoPDF) - 1] = '\0';
+
+    char *ext = strrchr(archivoPDF, '.');
+    if (ext && strcmp(ext, ".tex") == 0) {
+        strcpy(ext, ".pdf");
+    } else {
+        strcat(archivoPDF, ".pdf");
+    }
+
+    if (compilarTexPdf(nombreBeamer)) {
+        desplegarPdf(archivoPDF);
+    }
 
     printf("Proceso del Proyecto 1 finalizado.\n");
     return EXIT_SUCCESS;
@@ -216,6 +235,83 @@ char* obtenerNombreToken(TipoToken tipo) {
     }
 }
 
+
+// Convierte un token normal o error léxico a su representación en Beamer con estilos
+void formatearLexema(FILE *f_tex, int tipoToken, const char *lexema) {
+    char lexemaArreglado[256] = "";
+    int j = 0;
+    for (int i = 0; lexema[i] != '\0'; i++) {
+        if (lexema[i] == '{' || lexema[i] == '}' || lexema[i] == '#' ||
+            lexema[i] == '%' || lexema[i] == '&' || lexema[i] == '_') {
+            lexemaArreglado[j++] = '\\';
+        }
+        lexemaArreglado[j++] = lexema[i];
+    }
+    lexemaArreglado[j] = '\0';
+
+    switch (tipoToken) {
+
+        case TokenPalabraReservada:
+            fprintf(f_tex, "\\colorbox{bgKey}{\\textcolor{ColorKeyword}{\\ttfamily\\textbf{%s}}} ", lexemaArreglado);
+            break;
+        case TokenID:
+            fprintf(f_tex, "\\colorbox{bgId}{\\textcolor{ColorId}{\\sffamily %s}} ", lexemaArreglado);
+            break;
+        case TokenInt:
+            fprintf(f_tex, "\\colorbox{bgConst}{\\textcolor{ColorConst}{\\texttt{%s}}} ", lexemaArreglado);
+            break;
+        case TokenFloat:
+            fprintf(f_tex, "\\colorbox{bgConst}{\\textcolor{ColorConst}{\\texttt{%s}}} ", lexemaArreglado);
+            break;
+        case TokenOp:
+            fprintf(f_tex, "\\colorbox{bgOp}{\\textcolor{ColorOp}{\\texttt{%s}}} ", lexemaArreglado);
+            break;
+        case TokenSeparador:
+            fprintf(f_tex, "\\colorbox{bgDelim}{\\textcolor{ColorDelim}{\\texttt{%s}}} ", lexemaArreglado);
+            break;
+        case TokenError:
+            fprintf(f_tex, "\\colorbox{bgError}{\\textcolor{ColorError}{\\ttfamily\\textbf{%s}}} ", lexemaArreglado);
+            break;
+        default:
+            fprintf(f_tex, "%s ", lexemaArreglado);
+    }
+}
+
+// Maneja la escritura del código preprocesado en los slides con un máximo de 20 líneas en cada uno.
+void dividirCodigoSlides(FILE *f_tex) {
+
+    Token token;
+    int lineaAct = 1;
+    int lineasSlide = 0;
+    int numSlide = 1;
+
+    fprintf(f_tex, "\\begin{frame}[fragile]{Programa Fuente Procesado (Pág. %d)}\n  \\small\n  ", numSlide);
+
+    do {
+        token = getToken();
+
+        if (token.tipo != TokenEOF) {
+            // Si el token proviene de una nueva línea en el archivo original, hace salto de línea en LaTeX
+            while (lineaAct < token.numLinea) {
+                fprintf(f_tex, " \\\\\n  ");
+                lineaAct++;
+                lineasSlide++;
+
+                if (lineasSlide >= 20) {
+                    numSlide++;
+                    fprintf(f_tex, "\\end{frame}\n\n");
+                    fprintf(f_tex, "\\begin{frame}[fragile]{Programa Fuente Procesado (Pág. %d)}\n  \\small\n  ", numSlide);
+                    lineasSlide = 0;
+                }
+            }
+
+            formatearLexema(f_tex, token.tipo, token.lexema);
+        }
+    } while (token.tipo != TokenEOF);
+
+    fprintf(f_tex, "\n\\end{frame}\n\n");
+}
+
 void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *errores, int cantErrores) {
     FILE *f = fopen(nombreArchivo, "w");
     if (!f) {
@@ -225,13 +321,15 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
 
     // Prólogo de LaTeX y definición de colores y estilos
     fprintf(f, "\\documentclass{beamer}\n");
-    //fprintf(f, "\\usepackage[utf8]{utf8}\n");
-    fprintf(f, "\\usepackage[spanish]{babel}\n");
+    fprintf(f, "\\usepackage[utf8]{inputenc}\n");
+    //fprintf(f, "\\usepackage[spanish]{babel}\n");
     fprintf(f, "\\usepackage{pgfplots}\n");
     fprintf(f, "\\usepackage{booktabs}\n");
     fprintf(f, "\\usepackage{xcolor}\n");
     fprintf(f, "\\usepackage{amssymb}\n");
-    fprintf(f, "\\pgfplotsset{compat=1.18}\n\n");
+
+    fprintf(f, "\\usepgfplotslibrary{polar}\n");
+    fprintf(f, "\\pgfplotsset{compat=1.18}\n");
     
     fprintf(f, "\\usetheme{Madrid}\n");
     fprintf(f, "\\usecolortheme{whale}\n\n");
@@ -256,7 +354,6 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     // Diapositiva 1: Portada
     fprintf(f, "\\frame{\\titlepage}\n\n");
 
-
     // Diapositiva 2: Resumen de Categorías de Tokens
     fprintf(f, "\\begin{frame}{Resumen de Categorías de Tokens}\n");
     fprintf(f, "  \\begin{center}\n");
@@ -264,13 +361,13 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     fprintf(f, "      \\toprule\n");
     fprintf(f, "      \\textbf{Categoría} & \\textbf{Estilo Visual} & \\textbf{Cantidad} \\\\\n");
     fprintf(f, "      \\midrule\n");
-    fprintf(f, "      Palabras Reservadas & \\textcolor{ColorKeyword}{$\blacksquare$~Keyword} & %d \\\\\n", stats->palabrasReservadas);
-    fprintf(f, "      Identificadores     & \\textcolor{ColorId}{$\blacksquare$~Identifier} & %d \\\\\n", stats->identificadores);
-    fprintf(f, "      Constantes          & \\textcolor{ColorConst}{$\blacksquare$~Constant} & %d \\\\\n", stats->num);
-    fprintf(f, "      Operadores          & \\textcolor{ColorOp}{$\blacksquare$~Operator} & %d \\\\\n", stats->operadores);
-    fprintf(f, "      Separadores       & \\textcolor{ColorDelim}{$\blacksquare$~Delimiter} & %d \\\\\n", stats->separadores);
+    fprintf(f, "      Palabras Reservadas & \\textcolor{ColorKeyword}{$\\blacksquare$~Keyword} & %d \\\\\n", stats->palabrasReservadas);
+    fprintf(f, "      Identificadores     & \\textcolor{ColorId}{$\\blacksquare$~Identifier} & %d \\\\\n", stats->identificadores);
+    fprintf(f, "      Constantes          & \\textcolor{ColorConst}{$\\blacksquare$~Constant} & %d \\\\\n", stats->num);
+    fprintf(f, "      Operadores          & \\textcolor{ColorOp}{$\\blacksquare$~Operator} & %d \\\\\n", stats->operadores);
+    fprintf(f, "      Separadores       & \\textcolor{ColorDelim}{$\\blacksquare$~Delimiter} & %d \\\\\n", stats->separadores);
     fprintf(f, "      \\midrule\n");
-    fprintf(f, "      \\textbf{Errores Léxicos} & \\textcolor{ColorError}{$\blacksquare$~Lexical Error} & \\textbf{%d} \\\\\n", stats->erroresLexicos);
+    fprintf(f, "      \\textbf{Errores Léxicos} & \\textcolor{ColorError}{$\\blacksquare$~Lexical Error} & \\textbf{%d} \\\\\n", stats->erroresLexicos);
     fprintf(f, "      \\bottomrule\n");
     fprintf(f, "    \\end{tabular}\n");
     fprintf(f, "  \\end{center}\n");
@@ -305,7 +402,7 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     fprintf(f, "    \\begin{tikzpicture}\n");
     fprintf(f, "      \\begin{axis}[\n");
     fprintf(f, "        ybar,\n");
-    fprintf(f, "        symbolic x coordinates={Key, Id, Const, Op, Delim, Error},\n");
+    fprintf(f, "        symbolic x coords={Reservada,Id,Num,Op,Separador,Error},\n");
     fprintf(f, "        xtick=data,\n");
     fprintf(f, "        nodes near coords,\n");
     fprintf(f, "        nodes near coords align={vertical},\n");
@@ -313,28 +410,106 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     fprintf(f, "        ylabel={Frecuencia},\n");
     fprintf(f, "        xlabel={Categorías},\n");
     fprintf(f, "        bar width=18pt,\n");
+    fprintf(f, "        bar shift=0pt,\n");
     fprintf(f, "        width=0.85\\textwidth,\n");
     fprintf(f, "        height=0.6\\textwidth,\n");
     fprintf(f, "        enlarge x limits=0.15\n");
     fprintf(f, "      ]\n");
 
     // Graficar histograma asociando las frecuencias
-    fprintf(f, "        \\addplot[draw=blue!50!black, fill=blue!30] coordinates {\n");
-    fprintf(f, "          (Key,%d)\n", stats->palabrasReservadas);
-    fprintf(f, "          (Id,%d)\n", stats->identificadores);
-    fprintf(f, "          (Const,%d)\n", stats->num);
-    fprintf(f, "          (Op,%d)\n", stats->operadores);
-    fprintf(f, "          (Delim,%d)\n", stats->separadores);
-    fprintf(f, "          (Error,%d)\n", stats->erroresLexicos);
-    fprintf(f, "        };\n");
+    fprintf(f, "        \\addplot[draw=ColorKeyword!80!black, fill=ColorKeyword] coordinates {(Reservada,%d)};\n", stats->palabrasReservadas);
+    fprintf(f, "        \\addplot[draw=ColorId!80!black, fill=ColorId] coordinates {(Id,%d)};\n", stats->identificadores);
+    fprintf(f, "        \\addplot[draw=ColorConst!80!black, fill=ColorConst] coordinates {(Num,%d)};\n", stats->num);
+    fprintf(f, "        \\addplot[draw=ColorOp!80!black, fill=ColorOp] coordinates {(Op,%d)};\n", stats->operadores);
+    fprintf(f, "        \\addplot[draw=ColorDelim!80!black, fill=ColorDelim] coordinates {(Separador,%d)};\n", stats->separadores);
+    fprintf(f, "        \\addplot[draw=ColorError!80!black, fill=ColorError] coordinates {(Error,%d)};\n", stats->erroresLexicos);
 
+    
     fprintf(f, "      \\end{axis}\n");
     fprintf(f, "    \\end{tikzpicture}\n");
     fprintf(f, "  \\end{center}\n");
     fprintf(f, "\\end{frame}\n\n");
 
+    // Diapositiva 5: Gráfico de Pastel en pgfplots
+    
+    int totalTokens = stats->palabrasReservadas + stats->identificadores + 
+                       stats->num + stats->operadores + 
+                       stats->separadores + stats->erroresLexicos;
+
+    fprintf(f, "\\begin{frame}{Distribución Porcentual (Gráfico de Pastel)}\n");
+    if (totalTokens == 0) {
+        fprintf(f, "  \\begin{alertblock}{Sin Datos}\n");
+        fprintf(f, "    No se registraron tokens para generar el gráfico de pastel.\n");
+        fprintf(f, "  \\end{alertblock}\n");
+    } else {
+        fprintf(f, "  \\begin{center}\n");
+        fprintf(f, "    \\begin{tikzpicture}\n");
+        // Entorno pgfplots con 'axis equal image' para evitar la deformación del gráfico
+        fprintf(f, "      \\begin{axis}[\n");
+        fprintf(f, "        hide axis,\n");
+        fprintf(f, "        axis equal image,\n"); // CLAVE: Mantiene la proporción 1:1 en pgfplots
+        fprintf(f, "        xmin=-1.8, xmax=1.8,\n");
+        fprintf(f, "        ymin=-1.8, ymax=1.8\n");
+        fprintf(f, "      ]\n");
+
+        struct {
+            int cantidad;
+            const char *color;
+        } categorias[6] = {
+            {stats->palabrasReservadas, "ColorKeyword"},
+            {stats->identificadores,    "ColorId"},
+            {stats->num,                "ColorConst"},
+            {stats->operadores,         "ColorOp"},
+            {stats->separadores,        "ColorDelim"},
+            {stats->erroresLexicos,     "ColorError"}
+        };
+
+        double angulo_actual = 0.0;
+        for (int i = 0; i < 6; i++) {
+            if (categorias[i].cantidad > 0) {
+                double porcentaje = ((double)categorias[i].cantidad / totalTokens) * 100.0;
+                double anguloPorcion = ((double)categorias[i].cantidad / totalTokens) * 360.0;
+                double anguloFin = angulo_actual + anguloPorcion;
+                double anguloMedio = angulo_actual + (anguloPorcion / 2.0);
+
+                // Dibujar el sector circular en el sistema de coordenadas de pgfplots
+                fprintf(f, "        \\draw[fill=%s, draw=white, thick] (axis cs:0,0) -- (%.2f:1.3) arc (%.2f:%.2f:1.3) -- cycle;\n",
+                        categorias[i].color, angulo_actual, angulo_actual, anguloFin);
+
+                // Etiqueta de porcentaje
+                if (porcentaje >= 5.0) {
+                    fprintf(f, "        \\node[white, font=\\bfseries\\tiny] at (%.2f:0.85) {%.1f\\%%};\n",
+                            anguloMedio, porcentaje);
+                }
+
+                angulo_actual = anguloFin;
+            }
+        }
+
+        fprintf(f, "      \\end{axis}\n");
+        fprintf(f, "    \\end{tikzpicture}\n");
+
+        // Leyenda
+        fprintf(f, "    \\vspace{0.2cm}\n");
+        fprintf(f, "    \\tiny\n");
+        fprintf(f, "    \\begin{tabular}{c c c}\n");
+        fprintf(f, "      \\textcolor{ColorKeyword}{$\\blacksquare$}~Key (%.1f\\%%) &\n", ((double)stats->palabrasReservadas/totalTokens)*100.0);
+        fprintf(f, "      \\textcolor{ColorId}{$\\blacksquare$}~Id (%.1f\\%%) &\n", ((double)stats->identificadores/totalTokens)*100.0);
+        fprintf(f, "      \\textcolor{ColorConst}{$\\blacksquare$}~Const (%.1f\\%%) \\\\\n", ((double)stats->num/totalTokens)*100.0);
+        fprintf(f, "      \\textcolor{ColorOp}{$\\blacksquare$}~Op (%.1f\\%%) &\n", ((double)stats->operadores/totalTokens)*100.0);
+        fprintf(f, "      \\textcolor{ColorDelim}{$\\blacksquare$}~Delim (%.1f\\%%) &\n", ((double)stats->separadores/totalTokens)*100.0);
+        fprintf(f, "      \\textcolor{ColorError}{$\\blacksquare$}~Error (%.1f\\%%)\n", ((double)stats->erroresLexicos/totalTokens)*100.0);
+        fprintf(f, "    \\end{tabular}\n");
+        fprintf(f, "  \\end{center}\n");
+    }
+    fprintf(f, "\\end{frame}\n\n");
+
+    rewind(yyin);
+    yyrestart(yyin);
+    dividirCodigoSlides(f);
+
     fprintf(f, "\\end{document}\n");
 
     fclose(f);
-    printf("[OK] Archivo Beamer generado exitosamente: %s\n", nombreArchivo);
+    printf("Archivo Beamer generado exitosamente: %s\n", nombreArchivo);
 }

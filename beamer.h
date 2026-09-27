@@ -23,4 +23,7 @@ struct ErrorLexico {
 
 void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *errores, int cantErrores);
 
+int compilarTexPdf(char *archivoTex);
+int desplegarPdf(char *archivoPdf);
+
 #endif //BEAMER_H

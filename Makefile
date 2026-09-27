@@ -7,7 +7,7 @@ CFLAGS = -Wall -Wextra
 LIBS = -lfl
 
 # Archivos fuente
-SRCS = main.c compilador.c beamer.c despliegue.c lex.yy.c
+SRCS = main.c beamer.c lex.yy.c
 
 all: $(TARGET)
 
@@ -21,6 +21,6 @@ $(TARGET): $(SRCS)
 
 # Limpieza del proyecto
 clean:
-	rm -f $(TARGET) lex.yy.c *.o *.aux *.log *.nav *.snm *.toc *.out
+	rm -f $(TARGET) lex.yy.c *.o *.aux *.log *.nav *.snm *.toc *.out *.pdf *.tex *.tmp
 
 .PHONY: all clean
