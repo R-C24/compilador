@@ -31,6 +31,7 @@ Token crearToken(TipoToken tipo, double valor) {
 DIGITO        [0-9]
 LETRA         [a-zA-Z_]
 HEX           [0-9a-fA-F]
+
 ID            {LETRA}({LETRA}|{DIGITO})*
 INT           {DIGITO}+[uU]?[lL]{0,2}|0[xX]{HEX}+[uU]?[lL]{0,2}
 FLOAT         ({DIGITO}+\.{DIGITO}*|\.{DIGITO}+)([eE][+-]?{DIGITO}+)?[fFlL]?|{DIGITO}+[eE][+-]?{DIGITO}+[fFlL]?
@@ -56,6 +57,11 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
                  }
 
 "/*"([^*]|\*+[^*/])* { return (tokenAct = crearToken(TokenError, 0)).tipo; }
+
+    /* Enteros decimales y hexadecimales válidos */
+0[xX]{HEX}+|{DIGITO}+ {
+    return (tokenAct = crearToken(TokenInt, (double)strtol(yytext, NULL, 0))).tipo;
+}
 
     /* 1. Capturar identificadores mal formados que inician con números */
 {DIGITO}+{LETRA}({LETRA}|{DIGITO})* { return (tokenAct = crearToken(TokenError, 0)).tipo; }

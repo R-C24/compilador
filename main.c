@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <ctype.h>
 #include "compilador.h"
 #include "beamer.h"
 
@@ -171,7 +172,75 @@ void agregarMacro(char *nombre, char *valor) {
     }
 }
 
-// REVISAR Hay que cuidar que la sustitución no reemplace nombres de macros dentro de cadenas de texto literal (por ejemplo printf("TOTAL");) o dentro de nombres de variables compuestas (por ejemplo TOTAL_SUMA).
+// Verifica si un carácter puede ser parte de un identificador
+int esCaracterIdentificador(char c){
+    return isalnum((unsigned char)c) || c == '_';
+}
+
+// Verifica si un carácter en una posición está escapado ('\')
+int esEscapado(char *str, int pos){
+    int slashes = 0;
+    while (pos > 0 && str[pos - 1] == '\\') {
+        slashes++;
+        pos--;
+    }
+    return (slashes % 2 != 0);
+}
+
+char *buscarMacroValida(char *linea, char *nombre){
+    int len = strlen(nombre);
+    int enCadena = 0;
+    int enChar = 0;
+    int enComentarioBloque = 0;
+
+    for (int i = 0; linea[i] != '\0'; i++) {
+        // 1. Omitir comentarios de línea '//'
+        if (!enCadena && !enChar && !enComentarioBloque && linea[i] == '/' && linea[i + 1] == '/') {
+            break;
+        }
+
+        // 2. Omitir comentarios de bloque '/*' ... '*/'
+        if (!enCadena && !enChar && !enComentarioBloque && linea[i] == '/' && linea[i + 1] == '*') {
+            enComentarioBloque = 1;
+            i++;
+            continue;
+        }
+        if (enComentarioBloque) {
+            if (linea[i] == '*' && linea[i + 1] == '/') {
+                enComentarioBloque = 0;
+                i++;
+            }
+            continue;
+        }
+
+        // 3. Omitir contenido entre comillas ("..." o '...')
+        if (!enCadena && linea[i] == '\'' && !esEscapado(linea, i)) {
+            enChar = !enChar;
+            continue;
+        }
+        if (!enChar && linea[i] == '"' && !esEscapado(linea, i)) {
+            enCadena = !enCadena;
+            continue;
+        }
+
+        if (enCadena || enChar) {
+            continue;
+        }
+
+        // 4. Validar si la macro coincide en posición y límites de palabra
+        if (strncmp(&linea[i], nombre, len) == 0) {
+            int limiteIzquierdo = (i == 0) || !esCaracterIdentificador(linea[i - 1]);
+            int limiteDerecho = !esCaracterIdentificador(linea[i + len]);
+
+            if (limiteIzquierdo && limiteDerecho) {
+                return (char *)&linea[i];
+            }
+        }
+    }
+
+    return NULL;
+}
+
 // Reemplaza las macros por el valor que representan.
 void traducirMacros(char *linea) {
     char resultado[TamBuffer];
@@ -180,7 +249,7 @@ void traducirMacros(char *linea) {
     while (traducido) {
         traducido = 0;
         for (int i = 0; i < totalMacros; i++) {
-            char *pos = strstr(linea, macros[i].nombre);
+            char *pos = buscarMacroValida(linea, macros[i].nombre);
             if (pos != NULL) {
                 int antes = pos - linea;
                 snprintf(resultado, sizeof(resultado), "%.*s%s%s",
@@ -210,7 +279,7 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
             char subArchivo[MaxNombre];
             if (sscanf(linea, "#include \"%[^\"]\"", subArchivo) == 1) {
                 procesarArchivo(subArchivo, f_out);
-                continue; // REVISAR
+                continue;
             }
         }
 
@@ -220,6 +289,7 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
 
             if (sscanf(linea, "#define %s %[^\n]", nombre, valor) >= 2) {
                 agregarMacro(nombre, valor);
+
                 continue; // REVISAR
             }
         }
@@ -342,27 +412,29 @@ void formatearLexema(FILE *f_tex, int tipoToken, const char *lexema) {
 void dividirCodigoSlides(FILE *f_tex) {
 
     Token token;
-    int lineaAct = 1;
+    int lineaAct = -1;
     int lineasSlide = 0;
     int numSlide = 1;
-
-    fprintf(f_tex, "\\begin{frame}[fragile]{Programa Fuente Procesado (Pág. %d)}\n  \\small\n  ", numSlide);
 
     do {
         token = getToken();
 
         if (token.tipo != TokenEOF) {
-            // Si el token proviene de una nueva línea en el archivo original, hace salto de línea en LaTeX
-            while (lineaAct < token.numLinea) {
-                fprintf(f_tex, "\\par\\noindent");
-                lineaAct++;
-                lineasSlide++;
+            if (lineaAct == -1) {
+                lineaAct = token.numLinea;
+                fprintf(f_tex, "\\begin{frame}[fragile]{Programa Fuente Procesado (Pág. %d)}\n  \\small\\raggedright\n  ", numSlide);
+            } else {
+                while (lineaAct < token.numLinea) {
+                    fprintf(f_tex, "\\par\\noindent");
+                    lineaAct++;
+                    lineasSlide++;
 
-                if (lineasSlide >= 20) {
-                    numSlide++;
-                    fprintf(f_tex, "\n\\end{frame}\n\n");
-                    fprintf(f_tex, "\\begin{frame}[fragile]{Programa Fuente Procesado (Pág. %d)}\n  \\small\\raggedright\n  ", numSlide);
-                    lineasSlide = 0;
+                    if (lineasSlide >= 20) {
+                        numSlide++;
+                        fprintf(f_tex, "\n\\end{frame}\n\n");
+                        fprintf(f_tex, "\\begin{frame}[fragile]{Programa Fuente Procesado (Pág. %d)}\n  \\small\\raggedright\n  ", numSlide);
+                        lineasSlide = 0;
+                    }
                 }
             }
 
@@ -370,7 +442,9 @@ void dividirCodigoSlides(FILE *f_tex) {
         }
     } while (token.tipo != TokenEOF);
 
-    fprintf(f_tex, "\n\\end{frame}\n\n");
+    if (lineaAct != -1) {
+        fprintf(f_tex, "\n\\end{frame}\n\n");
+    }
 }
 
 void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *errores, int cantErrores) {

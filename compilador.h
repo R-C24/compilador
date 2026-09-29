@@ -17,6 +17,10 @@ extern int totalMacros;
 
 void agregarMacro(char *nombre, char *valor);
 void traducirMacros(char *linea);
+int esCaracterIdentificador(char c);
+int esEscapado(char *str, int pos);
+char *buscarMacroValida(char *linea, char *nombre);
+
 void procesarArchivo(char *nombreArchivo, FILE *f_out);
 
 // -------------Tokens-------------
