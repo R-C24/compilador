@@ -35,7 +35,7 @@ ID            {LETRA}({LETRA}|{DIGITO})*
 INT           {DIGITO}+[uU]?[lL]{0,2}|0[xX]{HEX}+[uU]?[lL]{0,2}
 FLOAT         ({DIGITO}+\.{DIGITO}*|\.{DIGITO}+)([eE][+-]?{DIGITO}+)?[fFlL]?|{DIGITO}+[eE][+-]?{DIGITO}+[fFlL]?
 STRING        \"([^\"\n\\]|\\.)*\"
-CHAR          \'([^\'\n\\]|\\.)*\'
+
 
 LINEACOMENTARIO  "//".*
 BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
@@ -44,7 +44,6 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 
 \n  { lineaAct++; columnaAct = 1; }
 [ \t\r]+
-
 
 {LINEACOMENTARIO}   {  }
 {BLOQUECOMENTARIO}  {
@@ -56,14 +55,40 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
                     }
                  }
 
+"/*"([^*]|\*+[^*/])* { return (tokenAct = crearToken(TokenError, 0)).tipo; }
+
+    /* 1. Capturar identificadores mal formados que inician con números */
+{DIGITO}+{LETRA}({LETRA}|{DIGITO})* { return (tokenAct = crearToken(TokenError, 0)).tipo; }
+
+    /* 2. Capturar Hexadecimales corruptos con letras fuera de A-F */
+0[xX]{HEX}*[g-zG-Z_]+({LETRA}|{DIGITO})* { return (tokenAct = crearToken(TokenError, 0)).tipo; }
+
+    /* 3. Capturar Flotantes con múltiples puntos decimales */
+{DIGITO}+\.{DIGITO}*\.{DIGITO}*(\.{DIGITO}*)* { return (tokenAct = crearToken(TokenError, 0)).tipo; }
+
+={3,} { return (tokenAct = crearToken(TokenError, 0)).tipo; }
+
+    /* Modificadores*/
+"unsigned"|"signed"|"short"|"long" { return (tokenAct = crearToken(TokenModificador, 0)).tipo; }
+
+    /* Tipo de Dato*/
+"int"|"char"|"float"|"double"|"void" { return (tokenAct = crearToken(TokenTipoDato, 0)).tipo; }
+
     /* Palabras Reservadas*/
-"auto"|"break"|"case"|"char"|"const"|"continue"|"default"|"do"|"double"|"else"|"enum"|"extern"|"float"|"for"|"goto"|"if"|"int"|"long"|"register"|"return"|"short"|"signed"|"sizeof"|"static"|"struct"|"switch"|"typedef"|"union"|"unsigned"|"void"|"volatile"|"while"  { return (tokenAct = crearToken(TokenPalabraReservada, 0)).tipo; }
+"auto"|"break"|"case"|"const"|"continue"|"default"|"do"|"else"|"enum"|"extern"|"for"|"goto"|"if"|"register"|"return"|"sizeof"|"static"|"struct"|"switch"|"typedef"|"union"|"volatile"|"while"  { return (tokenAct = crearToken(TokenPalabraReservada, 0)).tipo; }
 
     /* Literales */
 {INT}     { return (tokenAct = crearToken(TokenInt, (double)strtol(yytext, NULL, 0))).tipo;}
 {FLOAT}   { return (tokenAct = crearToken(TokenFloat, atof(yytext))).tipo;}
 {STRING}  { return (tokenAct = crearToken(TokenString, 0)).tipo;}
-{CHAR}    { return (tokenAct = crearToken(TokenChar, (double)yytext[1])).tipo;}
+
+\'\' { return (tokenAct = crearToken(TokenError, 0)).tipo; }
+
+\'(\\.|[\x80-\xFF]|[^\\'\n])\' { return (tokenAct = crearToken(TokenChar, (double)yytext[1])).tipo;}
+
+\'([^'\n\\]|\\.)+\' { return (tokenAct = crearToken(TokenError, 0)).tipo; }
+
+\"([^\"\n\\]|\\.)* { return (tokenAct = crearToken(TokenError, 0)).tipo; }
 
     /* Identificadores*/
 {ID} { return (tokenAct = crearToken(TokenID, 0)).tipo; }
@@ -71,9 +96,11 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
     /* Operadores*/
 "<<="|">>="|"=="|"!="|"<="|">="|"&&"|"||"|"<<"|">>"|"++"|"--"|"+="|"-="|"*="|"/="|"%="|"&="|"^="|"\|="|"->"|"+"|"-"|"*"|"/"|"%"|"="|"<"|">"|"!"|"&"|"\|"|"^"|"~"|"?"  { return (tokenAct = crearToken(TokenOp, 0)).tipo; }
 
-
     /* Delimitadores*/
-";"|","|"."|"{"|"}"|"("|")"|"["|"]"|"#" { return (tokenAct = crearToken(TokenSeparador, 0)).tipo; }
+";"|","|"."|"{"|"}"|"("|")"|"["|"]"|"#"|":" { return (tokenAct = crearToken(TokenSeparador, 0)).tipo; }
+
+    /* Caracteres fuera de ASCII (Tildes, ñ, UTF-8 en nombres de variables o símbolos) */
+[\x80-\xFF]+ { return (tokenAct = crearToken(TokenError, 0)).tipo; }
 
 .  { return (tokenAct = crearToken(TokenError, 0)).tipo; }
 

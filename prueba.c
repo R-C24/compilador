@@ -13,6 +13,12 @@ int main() {
     // Simulación de error léxico con caracteres no válidos
     char @caracterInvalido = '$';
 
+    char ejemplo = 'h';
+
+    char *palabra = "hola";
+
+    unsigned long long grande = 18446744073709551615ULL;
+
     if (contador < MAX) {
         contador = <contador + 1;
     }

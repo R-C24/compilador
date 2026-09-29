@@ -6,6 +6,7 @@
 typedef struct TokenStats TokenStats;
 struct TokenStats {
     int palabrasReservadas;
+    int modificadores;
     int identificadores;
     int num;
     int operadores;

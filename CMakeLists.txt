@@ -7,4 +7,9 @@ add_executable(compilador main.c
         compilador.h
         beamer.h
         prueba.c
-        beamer.c)
+        beamer.c
+        pruebaErroresLexicos.c
+        pruebaGrandota.c
+        pruebaBinaria.c
+        pruebaBase.c
+)

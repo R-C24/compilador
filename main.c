@@ -5,6 +5,8 @@
 #include "compilador.h"
 #include "beamer.h"
 
+#define ERRORES_POR_PAGINA 8
+
 Macro macros[MaxMacros];
 int totalMacros = 0;
 
@@ -89,6 +91,12 @@ int main(int argc, char *argv[]) {
                 case TokenPalabraReservada:
                     stats.palabrasReservadas++;
                     break;
+                case TokenModificador:
+                    stats.palabrasReservadas++;
+                    break;
+                case TokenTipoDato:
+                    stats.palabrasReservadas++;
+                    break;
                 case TokenID:
                     stats.identificadores++;
                     break;
@@ -127,10 +135,13 @@ int main(int argc, char *argv[]) {
         }
     } while (token.tipo != TokenEOF);
 
-    fclose(yyin);
+    rewind(yyin);
+    yyrestart(yyin);
 
     char *nombreBeamer = archivoSalida ? archivoSalida : "salidaPresentacion.tex";
     generarBeamer(nombreBeamer, &stats, errores, cantErrores);
+
+    fclose(yyin);
 
     char archivoPDF[256];
     strncpy(archivoPDF, nombreBeamer, sizeof(archivoPDF) - 1);
@@ -221,7 +232,7 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
 
 char* obtenerNombreToken(TipoToken tipo) {
     switch (tipo) {
-        case TokenPalabraReservada: return "PALABRA_RESERVADA";
+        case TokenPalabraReservada: return "PALABRA RESERVADA";
         case TokenID: return "IDENTIFICADOR";
         case TokenInt: return "INT";
         case TokenFloat: return "FLOAT";
@@ -230,47 +241,97 @@ char* obtenerNombreToken(TipoToken tipo) {
         case TokenOp: return "OPERADOR";
         case TokenSeparador: return "SEPARADOR";
         case TokenModificador: return "MODIFICADOR";
+        case TokenTipoDato: return "TIPO DE DATO";
         case TokenError: return "ERROR";
         default: return "DESCONOCIDO";
     }
 }
 
+void escaparCadena(char *lexema, char *lexemaArreglado){
+    int j = 0;
+    for (int i = 0; lexema[i] != '\0'; i++) {
+
+        unsigned char c = (unsigned char)lexema[i];
+
+        if (c >= 128) {
+            j += sprintf(&lexemaArreglado[j], "\\textbackslash{}x%02X", c);
+            continue;
+        } else
+        {
+            switch (lexema[i]){
+            case '{': case '}': case '#': case '%':
+            case '&': case '_': case '$':
+                lexemaArreglado[j++] = '\\';
+                lexemaArreglado[j++] = lexema[i];
+                break;
+            case '\\':
+                j += sprintf(&lexemaArreglado[j], "\\textbackslash{}");
+                break;
+            case '<':
+                j += sprintf(&lexemaArreglado[j], "\\textless{}");
+                break;
+            case '>':
+                j += sprintf(&lexemaArreglado[j], "\\textgreater{}");
+                break;
+            case '^':
+                j += sprintf(&lexemaArreglado[j], "\\textasciicircum{}");
+                break;
+            case '~':
+                j += sprintf(&lexemaArreglado[j], "\\textasciitilde{}");
+                break;
+            case '\'':
+                j += sprintf(&lexemaArreglado[j], "\\textquotesingle{}");
+                break;
+            case '"':
+                j += sprintf(&lexemaArreglado[j], "\"{}");
+                break;
+            default:
+                lexemaArreglado[j++] = lexema[i];
+                break;
+            }
+        }
+    }
+    lexemaArreglado[j] = '\0';
+}
 
 // Convierte un token normal o error léxico a su representación en Beamer con estilos
 void formatearLexema(FILE *f_tex, int tipoToken, const char *lexema) {
-    char lexemaArreglado[256] = "";
-    int j = 0;
-    for (int i = 0; lexema[i] != '\0'; i++) {
-        if (lexema[i] == '{' || lexema[i] == '}' || lexema[i] == '#' ||
-            lexema[i] == '%' || lexema[i] == '&' || lexema[i] == '_') {
-            lexemaArreglado[j++] = '\\';
-        }
-        lexemaArreglado[j++] = lexema[i];
-    }
-    lexemaArreglado[j] = '\0';
+    char lexemaArreglado[8192] = "";
+    escaparCadena(lexema, lexemaArreglado);
 
     switch (tipoToken) {
-
         case TokenPalabraReservada:
-            fprintf(f_tex, "\\colorbox{bgKey}{\\textcolor{ColorKeyword}{\\ttfamily\\textbf{%s}}} ", lexemaArreglado);
+            fprintf(f_tex, "{\\textcolor{ColorKeyword}{\\ttfamily\\textbf{%s}}} ", lexemaArreglado);
             break;
         case TokenID:
-            fprintf(f_tex, "\\colorbox{bgId}{\\textcolor{ColorId}{\\sffamily %s}} ", lexemaArreglado);
+            fprintf(f_tex, "{\\textcolor{ColorId}{\\sffamily %s}} ", lexemaArreglado);
             break;
         case TokenInt:
-            fprintf(f_tex, "\\colorbox{bgConst}{\\textcolor{ColorConst}{\\texttt{%s}}} ", lexemaArreglado);
+            fprintf(f_tex, "{\\textcolor{ColorConst}{\\texttt{%s}}} ", lexemaArreglado);
             break;
         case TokenFloat:
-            fprintf(f_tex, "\\colorbox{bgConst}{\\textcolor{ColorConst}{\\texttt{%s}}} ", lexemaArreglado);
+            fprintf(f_tex, "{\\textcolor{ColorConst}{\\texttt{%s}}} ", lexemaArreglado);
             break;
         case TokenOp:
-            fprintf(f_tex, "\\colorbox{bgOp}{\\textcolor{ColorOp}{\\texttt{%s}}} ", lexemaArreglado);
+            fprintf(f_tex, "{\\textcolor{ColorOp}{\\texttt{%s}}} ", lexemaArreglado);
             break;
         case TokenSeparador:
-            fprintf(f_tex, "\\colorbox{bgDelim}{\\textcolor{ColorDelim}{\\texttt{%s}}} ", lexemaArreglado);
+            fprintf(f_tex, "{\\textcolor{ColorDelim}{\\texttt{%s}}} ", lexemaArreglado);
             break;
         case TokenError:
-            fprintf(f_tex, "\\colorbox{bgError}{\\textcolor{ColorError}{\\ttfamily\\textbf{%s}}} ", lexemaArreglado);
+            fprintf(f_tex, "{\\textcolor{ColorError}{\\ttfamily\\textbf{%s}}} ", lexemaArreglado);
+            break;
+        case TokenChar:
+            fprintf(f_tex, "{\\textcolor{ColorChar}{\\texttt{%s}}} ", lexemaArreglado);
+            break;
+        case TokenString:
+            fprintf(f_tex, "{\\textcolor{ColorString}{\\texttt{%s}}} ", lexemaArreglado);
+            break;
+        case TokenModificador:
+            fprintf(f_tex, "{\\textcolor{ColorMod}{\\texttt{%s}}} ", lexemaArreglado);
+            break;
+        case TokenTipoDato:
+            fprintf(f_tex, "{\\textcolor{ColorTipoDato}{\\texttt{%s}}} ", lexemaArreglado);
             break;
         default:
             fprintf(f_tex, "%s ", lexemaArreglado);
@@ -293,14 +354,14 @@ void dividirCodigoSlides(FILE *f_tex) {
         if (token.tipo != TokenEOF) {
             // Si el token proviene de una nueva línea en el archivo original, hace salto de línea en LaTeX
             while (lineaAct < token.numLinea) {
-                fprintf(f_tex, " \\\\\n  ");
+                fprintf(f_tex, "\\par\\noindent");
                 lineaAct++;
                 lineasSlide++;
 
                 if (lineasSlide >= 20) {
                     numSlide++;
-                    fprintf(f_tex, "\\end{frame}\n\n");
-                    fprintf(f_tex, "\\begin{frame}[fragile]{Programa Fuente Procesado (Pág. %d)}\n  \\small\n  ", numSlide);
+                    fprintf(f_tex, "\n\\end{frame}\n\n");
+                    fprintf(f_tex, "\\begin{frame}[fragile]{Programa Fuente Procesado (Pág. %d)}\n  \\small\\raggedright\n  ", numSlide);
                     lineasSlide = 0;
                 }
             }
@@ -322,11 +383,12 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     // Prólogo de LaTeX y definición de colores y estilos
     fprintf(f, "\\documentclass{beamer}\n");
     fprintf(f, "\\usepackage[utf8]{inputenc}\n");
-    //fprintf(f, "\\usepackage[spanish]{babel}\n");
+    fprintf(f, "\\usepackage[spanish]{babel}\n");
     fprintf(f, "\\usepackage{pgfplots}\n");
     fprintf(f, "\\usepackage{booktabs}\n");
     fprintf(f, "\\usepackage{xcolor}\n");
     fprintf(f, "\\usepackage{amssymb}\n");
+    fprintf(f, "\\usepackage{textcomp}\n");
 
     fprintf(f, "\\usepgfplotslibrary{polar}\n");
     fprintf(f, "\\pgfplotsset{compat=1.18}\n");
@@ -341,6 +403,10 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     fprintf(f, "\\definecolor{ColorOp}{RGB}{230, 126, 34}\n");        // Naranja
     fprintf(f, "\\definecolor{ColorDelim}{RGB}{127, 140, 141}\n");    // Gris
     fprintf(f, "\\definecolor{ColorError}{RGB}{192, 57, 43}\n\n");    // Rojo
+    fprintf(f, "\\definecolor{ColorChar}{RGB}{102, 72, 47}\n\n");
+    fprintf(f, "\\definecolor{ColorString}{RGB}{202, 30, 100}\n\n");
+    fprintf(f, "\\definecolor{ColorMod}{RGB}{21, 80, 82}\n\n");
+    fprintf(f, "\\definecolor{ColorTipoDato}{RGB}{10, 125, 121}\n\n");
 
     // Datos del documento Beamer
     fprintf(f, "\\title[Análisis Léxico]{Reporte de Análisis Léxico}\n");
@@ -374,27 +440,45 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     fprintf(f, "\\end{frame}\n\n");
 
     // Diapositiva 3: Reporte de errores léxicos
-    fprintf(f, "\\begin{frame}{Detalle de Errores Léxicos}\n");
     if (cantErrores == 0) {
-        fprintf(f, "  \\begin{exampleblock}{Estado del Análisis}\n");
-        fprintf(f, "    No se detectaron errores léxicos durante la fase de escaneo.\n");
-        fprintf(f, "  \\end{exampleblock}\n");
-    } else {
-        fprintf(f, "  Se identificaron los siguientes caracteres no reconocidos o mal formados:\n\\vspace{0.3cm}\n");
-        fprintf(f, "  \\begin{center}\n");
-        fprintf(f, "    \\begin{tabular}{c c l}\n");
-        fprintf(f, "      \\toprule\n");
-        fprintf(f, "      \\textbf{Línea} & \\textbf{Lexema} & \\textbf{Descripción} \\\\\n");
-        fprintf(f, "      \\midrule\n");
-        for (int i = 0; i < cantErrores; i++) {
-            fprintf(f, "      %d & \\textcolor{ColorError}{\\texttt{%s}} & %s \\\\\n",
-                    errores[i].linea, errores[i].lexema, errores[i].descripcion);
-        }
-        fprintf(f, "      \\bottomrule\n");
-        fprintf(f, "    \\end{tabular}\n");
-        fprintf(f, "  \\end{center}\n");
-    }
+    fprintf(f, "\\begin{frame}{Detalle de Errores Léxicos}\n");
+    fprintf(f, "  \\begin{exampleblock}{Estado del Análisis}\n");
+    fprintf(f, "    No se detectaron errores léxicos durante la fase de escaneo.\n");
+    fprintf(f, "  \\end{exampleblock}\n");
     fprintf(f, "\\end{frame}\n\n");
+} else {
+    int totalPaginas = (cantErrores + ERRORES_POR_PAGINA - 1) / ERRORES_POR_PAGINA;
+
+    for (int i = 0; i < cantErrores; i++) {
+        int paginaActual = (i / ERRORES_POR_PAGINA) + 1;
+
+        // Apertura de un nuevo frame y tabla al inicio de cada página
+        if (i % ERRORES_POR_PAGINA == 0) {
+            fprintf(f, "\\begin{frame}{Detalle de Errores Léxicos (%d/%d)}\n", paginaActual, totalPaginas);
+            fprintf(f, "  \\begin{center}\n");
+            fprintf(f, "    \\small\n");
+            fprintf(f, "    \\begin{tabular}{c c p{5.5cm}}\n"); // Ancho fijo en la 3ra columna para evitar desbordes
+            fprintf(f, "      \\toprule\n");
+            fprintf(f, "      \\textbf{Línea} & \\textbf{Lexema} & \\textbf{Descripción} \\\\\n");
+            fprintf(f, "      \\midrule\n");
+        }
+
+        char lexemaArreglado[8192];
+        escaparCadena(errores[i].lexema, lexemaArreglado);
+
+        // Imprimir la fila con cuatro barras invertidas (\\\\) al final
+        fprintf(f, "      %d & \\textcolor{ColorError}{\\texttt{%s}} & %s \\\\\n",
+                errores[i].linea, lexemaArreglado, errores[i].descripcion);
+
+        // Cierre de la tabla y del frame
+        if ((i + 1) % ERRORES_POR_PAGINA == 0 || i == cantErrores - 1) {
+            fprintf(f, "      \\bottomrule\n");
+            fprintf(f, "    \\end{tabular}\n");
+            fprintf(f, "  \\end{center}\n");
+            fprintf(f, "\\end{frame}\n\n");
+        }
+    }
+}
 
     // Diapositiva 4: Histograma de Tokens con pgfplots
     fprintf(f, "\\begin{frame}{Distribución de Tokens (Histograma)}\n");
@@ -498,14 +582,12 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
         fprintf(f, "      \\textcolor{ColorConst}{$\\blacksquare$}~Const (%.1f\\%%) \\\\\n", ((double)stats->num/totalTokens)*100.0);
         fprintf(f, "      \\textcolor{ColorOp}{$\\blacksquare$}~Op (%.1f\\%%) &\n", ((double)stats->operadores/totalTokens)*100.0);
         fprintf(f, "      \\textcolor{ColorDelim}{$\\blacksquare$}~Delim (%.1f\\%%) &\n", ((double)stats->separadores/totalTokens)*100.0);
-        fprintf(f, "      \\textcolor{ColorError}{$\\blacksquare$}~Error (%.1f\\%%)\n", ((double)stats->erroresLexicos/totalTokens)*100.0);
+        fprintf(f, "      \\textcolor{ColorError}{$\\blacksquare$}~Error (%.1f\\%%)\\\\\n", ((double)stats->erroresLexicos/totalTokens)*100.0);
         fprintf(f, "    \\end{tabular}\n");
         fprintf(f, "  \\end{center}\n");
     }
     fprintf(f, "\\end{frame}\n\n");
 
-    rewind(yyin);
-    yyrestart(yyin);
     dividirCodigoSlides(f);
 
     fprintf(f, "\\end{document}\n");

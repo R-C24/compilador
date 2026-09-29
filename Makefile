@@ -21,6 +21,6 @@ $(TARGET): $(SRCS)
 
 # Limpieza del proyecto
 clean:
-	rm -f $(TARGET) lex.yy.c *.o *.aux *.log *.nav *.snm *.toc *.out *.pdf *.tex *.tmp
+	rm -f $(TARGET) lex.yy.c *.o *.aux *.log *.nav *.snm *.toc *.out *.pdf *.tex *.tmp *.vrb
 
 .PHONY: all clean

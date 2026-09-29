@@ -24,13 +24,14 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out);
 typedef enum {
     TokenEOF = 0,
     TokenPalabraReservada,
+    TokenModificador,
+    TokenTipoDato,
     TokenID,
     TokenInt,
     TokenFloat,
     TokenChar,
     TokenOp,
     TokenString,
-    TokenModificador,
     TokenSeparador,
     TokenError
 } TipoToken;
@@ -47,6 +48,7 @@ struct Token{
 Token getToken();
 char* obtenerNombreToken(TipoToken tipo);
 
+void escaparCadena(char *lexema, char *lexemaArreglado);
 void formatearLexema(FILE *f_tex, int tipoToken, const char *lexema);
 void dividirCodigoSlides(FILE *f_tex);
 
