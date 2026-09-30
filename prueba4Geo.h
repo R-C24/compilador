@@ -1,0 +1,9 @@
+#ifndef COMPILADOR_PRUEBA4GEO_H
+#define COMPILADOR_PRUEBA4GEO_H
+
+#include "prueba4Config.h"
+
+#define PI_VAL 3.14159265
+#define PI_DOBLE (PI_VAL * 2.0)
+
+#endif //COMPILADOR_PRUEBA4GEO_H

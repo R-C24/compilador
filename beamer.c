@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include "beamer.h"
 
-
+// 
 int compilarTexPdf(char *archivoTex) {
     char comando[512];
     char archivoPdf[512];
@@ -15,9 +15,6 @@ int compilarTexPdf(char *archivoTex) {
 
     int estado1 = system(comando);
     int estado2 = system(comando);
-
-    //printf("Estado1: %d.\n", estado1);
-    //printf("Estado2: %d.\n", estado2);
 
     strncpy(archivoPdf, archivoTex, sizeof(archivoPdf) - 1);
     char *dot = strrchr(archivoPdf, '.');
@@ -38,6 +35,7 @@ int compilarTexPdf(char *archivoTex) {
     }
 }
 
+// Abre el pdf con el comando evince
 int desplegarPdf(char *archivoPdf) {
     char comando[512];
     printf("Desplegando presentación en visor evince...\n");

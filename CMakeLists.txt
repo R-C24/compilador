@@ -6,10 +6,11 @@ set(CMAKE_C_STANDARD 11)
 add_executable(compilador main.c
         compilador.h
         beamer.h
-        prueba.c
         beamer.c
-        pruebaErroresLexicos.c
-        pruebaGrandota.c
-        pruebaBinaria.c
-        pruebaBase.c
+        prueba2.c
+        prueba3.c
+        prueba4.c
+        prueba4Config.h
+        prueba4Geo.h
+        prueba5.c
 )

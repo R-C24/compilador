@@ -2,6 +2,7 @@
 #define BEAMER_H
 
 #define MaxErrores 1000
+#define ErroresPorPagina 8
 
 typedef struct TokenStats TokenStats;
 struct TokenStats {

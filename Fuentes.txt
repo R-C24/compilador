@@ -1,0 +1,6 @@
+[1] P. Taylor, “Lex and Flex: Lexical Analyzer Overview,” Scribd, 2019. https://es.scribd.com/document/421578613/Practical-3
+[2] GeeksforGeeks, “FLEX (Fast Lexical Analyzer Generator),” GeeksforGeeks, Apr. 11, 2026. https://www.geeksforgeeks.org/compiler-design/flex-fast-lexical-analyzer-generator/
+[3] C. Mejia, “Funciones de unistd.h en C,” Scribd, 2019. https://es.scribd.com/document/420944931/unistd-h-pdf
+[4] The Open Group, “UNistD.H - Constantes y tipos simbólicos Estándar. https://pubs-opengroup-org.translate.goog/onlinepubs/7908799/xsh/unistd.h.html?_x_tr_sl=en&_x_tr_tl=es&_x_tr_hl=es&_x_tr_pto=tc
+[5] G. Gottschewski, "Writing a Lexical Analyzer using Flex" Medium, 2025. https://medium.com/@gregorgott.software/writing-a-lexical-analyzer-using-flex-0be029179087
+[6] S. Basnet, “Flex (fast lexical analyzer generator ),” SlideShare. https://es.slideshare.net/slideshow/flex-fast-lexical-analyzer-generator/194434563
