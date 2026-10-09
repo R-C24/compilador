@@ -26,7 +26,6 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out);
 // -------------Tokens-------------
 
 typedef enum {
-    TokenEOF = 0,
     TokenPalabraReservada,
     TokenModificador,
     TokenTipoDato,

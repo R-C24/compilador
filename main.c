@@ -11,13 +11,15 @@ int totalMacros = 0;
 
 extern FILE *yyin;
 extern void yyrestart(FILE *new_file);
+extern int yyparse();
 
 int main(int argc, char *argv[]) {
     int opt;
-    int activarPreproceso = 1; // El preproceso está activado por defecto.
+    int activarPreproceso = 0; // El preproceso está desactivado por defecto.
     char *archivoFuente = NULL;
     char *archivoSalida = "salidaPresentacion.tex";
 
+    //REVISAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAR
     while ((opt = getopt(argc, argv, "po:")) != -1) {
         switch (opt) {
             case 'p':
@@ -69,7 +71,10 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    TokenStats stats = {0};
+    printf("Iniciando análisis sintáctico con Bison...\n");
+    int resultado = yyparse();
+
+    /*TokenStats stats = {0};
     ErrorLexico errores[MaxErrores];
     int cantErrores = 0;
 
@@ -132,17 +137,17 @@ int main(int argc, char *argv[]) {
                 free(token.lexema);
             }
         }
-    } while (token.tipo != TokenEOF);
+    } while (token.tipo != TokenEOF); */
 
-    rewind(yyin);
-    yyrestart(yyin);
+    //rewind(yyin);
+    //yyrestart(yyin);
 
-    char *nombreBeamer = archivoSalida ? archivoSalida : "salidaPresentacion.tex";
-    generarBeamer(nombreBeamer, &stats, errores, cantErrores);
+    //char *nombreBeamer = archivoSalida ? archivoSalida : "salidaPresentacion.tex";
+    //generarBeamer(nombreBeamer, &stats, errores, cantErrores);
 
     fclose(yyin);
 
-    char archivoPDF[256];
+    /*char archivoPDF[256];
     strncpy(archivoPDF, nombreBeamer, sizeof(archivoPDF) - 1);
     archivoPDF[sizeof(archivoPDF) - 1] = '\0';
 
@@ -155,7 +160,7 @@ int main(int argc, char *argv[]) {
 
     if (compilarTexPdf(nombreBeamer)) {
         desplegarPdf(archivoPDF);
-    }
+    }*/
 
     printf("Proceso del Proyecto 1 finalizado.\n");
     return EXIT_SUCCESS;
@@ -323,6 +328,7 @@ char* obtenerNombreToken(TipoToken tipo) {
     }
 }
 
+/*
 // Prepara algunos elementos para imprimir en LaTex.
 void escaparCadena(char *lexema, char *lexemaArreglado){
     int j = 0;
@@ -735,3 +741,4 @@ void generarBeamer(const char *nombreArchivo, TokenStats *stats, ErrorLexico *er
     fclose(f);
     printf("Archivo Beamer generado exitosamente: %s\n", nombreArchivo);
 }
+*/
