@@ -62,12 +62,27 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 {STRING}  { return crearToken(TokenString, 0);}
 
     /* Modificadores y Tipos de Dato */
-"unsigned"|"signed"|"short"|"long" { return (crearToken(TokenModificador, 0)); }
+"unsigned"|"signed"|"short"|"long"|"static"|"extern"|"const"|"volatile"|"auto"|"register" { return (crearToken(TokenModificador, 0)); }
 "int"|"char"|"float"|"double"|"void" { return (crearToken(TokenTipoDato, 0)); }
 
     /* Palabras Reservadas */
-"auto"|"break"|"case"|"const"|"continue"|"default"|"do"|"else"|"enum"|"extern"|"for"|"goto"|"if"|"register"|"return"|"sizeof"|"static"|"struct"|"switch"|"typedef"|"union"|"volatile"|"while"  { return (crearToken(TokenPalabraReservada, 0)); }
-
+"break"     { return (crearToken(TokenBreak, 0)); }
+"continue"  { return (crearToken(TokenContinue, 0)); }
+"enum"      { return (crearToken(TokenEnum, 0)); }
+"goto"      { return (crearToken(TokenGoto, 0)); }
+"sizeof"    { return (crearToken(TokenSizeof, 0)); }
+"struct"    { return (crearToken(TokenStruct, 0)); }
+"typedef"   { return (crearToken(TokenTypedef, 0)); }
+"union"     { return (crearToken(TokenUnion, 0)); }
+"for"       { return (crearToken(TokenFor, 0)); }
+"if"        { return (crearToken(TokenIf, 0)); }
+"else"      { return (crearToken(TokenElse, 0)); }
+"switch"    { return (crearToken(TokenSwitch, 0)); }
+"while"     { return (crearToken(TokenWhile, 0)); }
+"do"        { return (crearToken(TokenDo, 0)); }
+"case"      { return (crearToken(TokenCase, 0)); }
+"return"    { return (crearToken(TokenReturn, 0)); }
+"default"   { return (crearToken(TokenDefault, 0)); }
 
     /* Patrones de errores léxicos */
 
@@ -95,11 +110,34 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 
     /* Tokens válidos */
 
-    /* Operadores válidos de 3 caracteres */
-"<<="|">>="|"\.\.\." {return (crearToken(TokenOp, 0));}
-
     /* Operadores */
-"=="|"!="|"<="|">="|"&&"|"||"|"<<"|">>"|"++"|"--"|"+="|"-="|"*="|"/="|"%="|"&="|"^="|"|="|"->"|"+"|"-"|"*"|"/"|"%"|"="|"<"|">"|"!"|"&"|"|"|"^"|"~"|"?" {return (  crearToken(TokenOp, 0)); }
+"->" {return "->"; }
+"?"  {return "?"; }
+
+    /* Operadores de asignación */
+"=" { return "="; }
+"+="|"-="|"*="|"/="|"%="|"&="|"^="|"|="|"<<="|">>=" {return (crearToken(TokenOpAsignacion, 0));}
+
+    /* Operadores lógicos */
+"&&"|"||"|"!"   {return (crearToken(TokenOpLogico, 0));}
+
+    /* Operadores de bits */
+"|"|"^"|"~"|"&" {return (crearToken(TokenOpBits, 0));}
+
+    /* Operadores de igualdad y relacionales */
+"=="|"!="|"<="|">="|"<"|">"    {return (crearToken(TokenOpIgualdad, 0));}
+
+    /* Operadores de desplazamiento */
+"<<"|">>"  {return (crearToken(TokenOpDesplazamiento, 0));}
+
+    /* Operadores de aditivos */
+"+"|"-" {return (crearToken(TokenOpAditivos, 0));}
+
+    /* Operadores de multiplicativos */
+"%"|"*"|"/" {return (crearToken(TokenOpMultiplicativos, 0));}
+
+    /* Operadores de incremento */
+"++"|"--"| {return (crearToken(TokenOpInc, 0));}
 
     /* Capturar un literal de carácter vacío */
 \'\' { return (crearToken(TokenError, 0)); }
@@ -116,8 +154,22 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
     /* Identificadores */
 {ID} { return (crearToken(TokenID, 0)); }
 
-    /* Delimitadores */
-";"|","|"."|"{"|"}"|"("|")"|"["|"]"|"#"|":" { return (crearToken(TokenSeparador, 0)); }
+    /* Separadores */
+/* ";"|","|"."|"{"|"}"|"("|")"|"["|"]"|"#"|":" { return (crearToken(TokenSeparador, 0)); } */
+
+";" { return ";"; }
+"," { return ","; }
+"." { return "."; }
+"{" { return "{"; }
+"}" { return "}"; }
+"(" { return "("; }
+")" { return ")"; }
+"[" { return "["; }
+"]" { return "]"; }
+"#" { return "#"; }
+":" { return ":"; }
+"..." { return "..."; }
+
 
     /* Caracteres fuera de ASCII */
 [\x80-\xFF]+ { return (  crearToken(TokenError, 0)); }

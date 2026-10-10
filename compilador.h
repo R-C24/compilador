@@ -36,6 +36,34 @@ typedef enum {
     TokenOp,
     TokenString,
     TokenSeparador,
+
+    TokenBreak,
+    TokenContinue,
+    TokenEnum,
+    TokenGoto,
+    TokenSizeof,
+    TokenStruct,
+    TokenTypedef,
+    TokenUnion,
+    TokenFor,
+    TokenIf,
+    TokenElse,
+    TokenSwitch,
+    TokenWhile,
+    TokenDo,
+    TokenCase,
+    TokenReturn,
+    TokenDefault,
+
+    TokenOpAsignacion,
+    TokenOpLogico,
+    TokenOpBits,
+    TokenOpIgualdad,
+    TokenOpDesplazamiento,
+    TokenOpAditivos,
+    TokenOpMultiplicativos,
+    TokenOpInc,
+
     TokenError
 } TipoToken;
 

@@ -12,6 +12,8 @@ extern FILE *yyin;
 void yyerror(const char *s);
 %}
 
+%define parse.error verbose
+
 /* Definición de los datos que puede almacenar un token/nodo en el parser */
 %union {
     struct {
@@ -41,23 +43,145 @@ void yyerror(const char *s);
 /* --- Reglas Gramaticales Iniciales --- */
 
 programa:
-    listaUnidadesTraduccion
+    /* Por si no hay nada */
+    | funcion
+    | declaracionVariable
     ;
 
-listaUnidadesTraduccion:
-    unidadTraduccion
-    | listaUnidadesTraduccion unidadTraduccion
+funcion:
+    listaModificadores TokenTipoDato TokenID '(' listaParametros ')' ';'
+    | listaModificadores TokenTipoDato TokenID '(' listaParametros ')' '{' bloqueCodigo '}' ';'
     ;
 
-unidadTraduccion:
-    declaracionGlobal
+bloqueCodigo:
+    /* Por si la función está vacía */
+    | listaDeclaracionVariables listaRelleno
+;
+
+listaRelleno:
+   /* Por si la función no tiene sentencias */
+   | listaRelleno relleno
     ;
 
-declaracionGlobal:
-      TokenTipoDato TokenID TokenSeparador
-    | TokenPalabraReservada TokenSeparador
-    | TokenSeparador
+relleno:
+    TokenPalabraReservada ';' /* (como break; continue; return;) */
+    | expresion
+    | condicionIf
+    | caseSwitch
+    | loopWhile
+    | loopFor
+    | loopDoWhile
+    |
     ;
+
+condicionIf:
+    TokenIf   '(' expresion ')' '{' bloqueCodigo '}'
+    | TokenIf '(' expresion ')'  '{' bloqueCodigo '}' condicionElseIf TokenElse '{' bloqueCodigo '}'
+    ;
+
+condicionElseIf:
+    | TokenIf '(' expresion ')' '{' bloqueCodigo '}' condicionElseIf
+    | TokenElse TokenIf '(' expresion ')' '{' bloqueCodigo '}' condicionElseIf
+    ;
+
+loopWhile:
+    TokenWhile '(' expresion ')' '{' bloqueCodigo '}'
+    ;
+
+loopDoWhile:
+    TokenDo '{' bloqueCodigo '}' TokenWhile '(' expresion ')' ';'
+;
+
+loopFor:
+    TokenFor '(' TokenTipoDato TokenID '=' elemento ';' condicional ';' expresion ')' '{' bloqueCodigo '}' ';'
+;
+
+condicional:
+    | expresion
+;
+
+caseSwitch:
+    TokenSwitch '(' expresion ')' '{' listaCasos '}'
+    | TokenSwitch '(' expresion ')' '{' listaCasos TokenDefault ':' bloqueCodigo '}'
+;
+
+listaCasos:
+    caso
+    | listaCasos caso
+;
+
+caso:
+    TokenCase elemento ':' bloqueCodigo TokenBreak ';'
+    | TokenCase elemento ':' bloqueCodigo
+;
+
+listaParametros:
+    /* para void */
+    | parametro
+    | listaParametros ',' parametro
+    ;
+
+parametro:
+    TokenTipoDato TokenID
+    | TokenModificador TokenTipoDato TokenID
+    ;
+
+listaDeclaracionVariables:
+    /* Por si la función no tiene declaraciones */
+    | listaDeclaracionVariables declaracionVariable
+    ;
+
+declaracionVariable:
+    listaModificadores TokenTipoDato TokenID ';'
+    | listaModificadores TokenTipoDato TokenID '=' expresion ';'
+    ;
+
+declaracionArrays:
+    TokenTipoDato TokenID '[' TokenInt ']' ';'
+    | TokenTipoDato TokenID '[' ']' '=' '{' listaElementos '}' ';'
+    | TokenTipoDato TokenID '[' TokenInt ']' '=' '{' listaElementos '}' ';'
+
+listaElementos:
+
+    | elemento
+    | listaElementos ',' elemento
+    ;
+
+elemento:
+    TokenInt
+    | TokenChar
+    | TokenFloat
+    | TokenString
+    ;
+
+listaModificadores:
+    /* Por si no tiene modificadores */
+    | listaModificadores TokenModificador
+    ;
+
+expresion:
+    TokenID
+    | TokenInt
+    | TokenFloat
+    | TokenChar
+    | TokenString
+    | '(' expresion ')'
+    | expresion TokenOp expresion
+    | TokenID '=' expresion
+    | TokenID TokenOp expresion
+    | TokenID '++'
+    | TokenID '--'
+    | TokenID '(' listaArgumentosOpt ')'
+;
+
+listaArgumentosOpt:
+    | listaArgumentos
+;
+
+listaArgumentos:
+    expresion
+    | listaArgumentos ',' expresion
+;
 
 %%
 

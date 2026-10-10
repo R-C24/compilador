@@ -6,6 +6,7 @@
 #include "compilador.h"
 #include "beamer.h"
 
+
 Macro macros[MaxMacros];
 int totalMacros = 0;
 
