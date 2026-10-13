@@ -26,14 +26,12 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out);
 // -------------Tokens-------------
 
 typedef enum {
-    TokenPalabraReservada,
     TokenModificador,
     TokenTipoDato,
     TokenID,
     TokenInt,
     TokenFloat,
     TokenChar,
-    TokenOp,
     TokenString,
     TokenSeparador,
 

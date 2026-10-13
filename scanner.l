@@ -119,7 +119,8 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 "+="|"-="|"*="|"/="|"%="|"&="|"^="|"|="|"<<="|">>=" {return (crearToken(TokenOpAsignacion, 0));}
 
     /* Operadores lógicos */
-"&&"|"||"|"!"   {return (crearToken(TokenOpLogico, 0));}
+"&&"|"||"  {return (crearToken(TokenOpLogico, 0));}
+"!"   {return "!" ; }
 
     /* Operadores de bits */
 "|"|"^"|"~"|"&" {return (crearToken(TokenOpBits, 0));}
@@ -138,6 +139,8 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 
     /* Operadores de incremento */
 "++"|"--"| {return (crearToken(TokenOpInc, 0));}
+
+
 
     /* Capturar un literal de carácter vacío */
 \'\' { return (crearToken(TokenError, 0)); }
