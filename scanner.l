@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "compilador.h"
 #include "parser.tab.h"
 
 int lineaAct = 1;
@@ -11,16 +12,6 @@ int columnaAct = 1;
     columnaAct += yyleng; \
 }
 
-
-int crearToken(int codToken, double valor) {
-
-    yylval.tokenInfo.lexema = strdup(yytext);
-    yylval.tokenInfo.valor = valor;
-    yylval.tokenInfo.linea = lineaAct;
-    yylval.tokenInfo.columna = columnaAct - yyleng;
-
-    return codToken;
-}
 %}
 
 %option noyywrap
@@ -111,16 +102,15 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
     /* Tokens válidos */
 
     /* Operadores */
-"->" {return "->"; }
-"?"  {return "?"; }
+"?"  {return '?'; }
 
     /* Operadores de asignación */
-"=" { return "="; }
+"=" { return '='; }
 "+="|"-="|"*="|"/="|"%="|"&="|"^="|"|="|"<<="|">>=" {return (crearToken(TokenOpAsignacion, 0));}
 
     /* Operadores lógicos */
 "&&"|"||"  {return (crearToken(TokenOpLogico, 0));}
-"!"   {return "!" ; }
+"!"   {return '!' ; }
 
     /* Operadores de bits */
 "|"|"^"|"~"|"&" {return (crearToken(TokenOpBits, 0));}
@@ -138,9 +128,7 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 "%"|"*"|"/" {return (crearToken(TokenOpMultiplicativos, 0));}
 
     /* Operadores de incremento */
-"++"|"--"| {return (crearToken(TokenOpInc, 0));}
-
-
+"++"|"--" {return (crearToken(TokenOpInc, 0));}
 
     /* Capturar un literal de carácter vacío */
 \'\' { return (crearToken(TokenError, 0)); }
@@ -158,21 +146,18 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 {ID} { return (crearToken(TokenID, 0)); }
 
     /* Separadores */
-/* ";"|","|"."|"{"|"}"|"("|")"|"["|"]"|"#"|":" { return (crearToken(TokenSeparador, 0)); } */
 
-";" { return ";"; }
-"," { return ","; }
-"." { return "."; }
-"{" { return "{"; }
-"}" { return "}"; }
-"(" { return "("; }
-")" { return ")"; }
-"[" { return "["; }
-"]" { return "]"; }
-"#" { return "#"; }
-":" { return ":"; }
-"..." { return "..."; }
-
+";" { return ';'; }
+"," { return ','; }
+"." { return '.'; }
+"{" { return '{'; }
+"}" { return '}'; }
+"(" { return '('; }
+")" { return ')'; }
+"[" { return '['; }
+"]" { return ']'; }
+"#" { return '#'; }
+":" { return ':'; }
 
     /* Caracteres fuera de ASCII */
 [\x80-\xFF]+ { return (  crearToken(TokenError, 0)); }
@@ -180,6 +165,17 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 .  { return (crearToken(TokenError, 0)); }
 
 %%
+
+int crearToken(int codToken, double valor) {
+
+    yylval.tokenInfo.lexema = strdup(yytext);
+    yylval.tokenInfo.valor = valor;
+    yylval.tokenInfo.linea = lineaAct;
+    yylval.tokenInfo.columna = columnaAct - yyleng;
+
+    return codToken;
+}
+
 /*
 Token getToken() {
     int token = yylex();

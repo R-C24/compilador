@@ -20,7 +20,7 @@ lex.yy.c: scanner.l parser.tab.h
 	flex scanner.l
 
 # Regla para compilar el ejecutable
-$(TARGET): $(SRCS)
+$(TARGET): parser.tab.h lex.yy.c $(SRCS)
 	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET) $(LIBS)
 
 # Limpieza del proyecto

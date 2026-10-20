@@ -25,60 +25,43 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out);
 
 // -------------Tokens-------------
 
-typedef enum {
-    TokenModificador,
-    TokenTipoDato,
-    TokenID,
-    TokenInt,
-    TokenFloat,
-    TokenChar,
-    TokenString,
-    TokenSeparador,
-
-    TokenBreak,
-    TokenContinue,
-    TokenEnum,
-    TokenGoto,
-    TokenSizeof,
-    TokenStruct,
-    TokenTypedef,
-    TokenUnion,
-    TokenFor,
-    TokenIf,
-    TokenElse,
-    TokenSwitch,
-    TokenWhile,
-    TokenDo,
-    TokenCase,
-    TokenReturn,
-    TokenDefault,
-
-    TokenOpAsignacion,
-    TokenOpLogico,
-    TokenOpBits,
-    TokenOpIgualdad,
-    TokenOpDesplazamiento,
-    TokenOpAditivos,
-    TokenOpMultiplicativos,
-    TokenOpInc,
-
-    TokenError
-} TipoToken;
-
-typedef struct Token Token;
-struct Token{
-    TipoToken tipo;
+typedef struct {
     char *lexema;
     double valor;
-    int numLinea;
-    int numColumna;
-};
-
-Token getToken();
-char* obtenerNombreToken(TipoToken tipo);
+    int linea;
+    int columna;
+} InfoToken;
 
 void escaparCadena(char *lexema, char *lexemaArreglado);
 void formatearLexema(FILE *f_tex, int tipoToken, const char *lexema);
 void dividirCodigoSlides(FILE *f_tex);
+
+typedef enum {
+    nodoPrograma,
+    nodoFuncion,
+    nodoBloqueCodigo,
+    nodoRelleno,
+    nodoCondicionIf,
+    nodoCondicionElseIf,
+    nodoLoopWhile,
+    nodoLoopDoWhile,
+    nodoLoopFor,
+    nodoCaseSwitch,
+    nodoListaCasos,
+    nodoCaso,
+    nodoDeclaracionVariable,
+    nodoExpresion
+} TipoNodo;
+
+struct ASTNodo {
+    TipoNodo tipo;
+    struct ASTNodo *izq;
+    struct ASTNodo *der;
+    char *valorLexema;
+    double valorNumerico;
+};
+
+struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *der, char *lexema);
+void imprimirAST(struct ASTNodo *nodo, int nivel);
 
 #endif //COMPILADOR_H
