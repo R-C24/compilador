@@ -64,4 +64,23 @@ struct ASTNodo {
 struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *der, char *lexema);
 void imprimirAST(struct ASTNodo *nodo, int nivel);
 
+typedef enum {
+    propio,
+    estiloGNU,
+    estiloBSD
+} EstiloPrettyPrint;
+
+void prettyPrintAST(struct ASTNodo *nodo, FILE *f, int nivel);
+void printDeclaracionVariable(struct ASTNodo *nodo, FILE *f, int nivel);
+void printCondicionIf(struct ASTNodo *nodo, FILE *f, int nivel);
+void printLoopWhile(struct ASTNodo *nodo, FILE *f, int nivel);
+void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel);
+void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel);
+void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel);
+void printParametros(struct ASTNodo *nodo, FILE *f);
+void printCaseSwitch(struct ASTNodo *nodo, FILE *f, int nivel);
+void printListaCasos(struct ASTNodo *nodo, FILE *f, int nivel);
+void printCaso(struct ASTNodo *nodo, FILE *f, int nivel);
+void printLoopDoWhile(struct ASTNodo *nodo, FILE *f, int nivel);
+
 #endif //COMPILADOR_H
