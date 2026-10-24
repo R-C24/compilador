@@ -50,7 +50,8 @@ typedef enum {
     nodoListaCasos,
     nodoCaso,
     nodoDeclaracionVariable,
-    nodoExpresion
+    nodoExpresion,
+    nodoLlamadaFuncion
 } TipoNodo;
 
 struct ASTNodo {
@@ -74,6 +75,7 @@ void prettyPrintAST(struct ASTNodo *nodo, FILE *f, int nivel);
 void printDeclaracionVariable(struct ASTNodo *nodo, FILE *f, int nivel);
 void printCondicionIf(struct ASTNodo *nodo, FILE *f, int nivel);
 void printLoopWhile(struct ASTNodo *nodo, FILE *f, int nivel);
+void printDeclaracionFor(struct ASTNodo *nodo, FILE *f);
 void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel);
 void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel);
 void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel);
@@ -82,5 +84,8 @@ void printCaseSwitch(struct ASTNodo *nodo, FILE *f, int nivel);
 void printListaCasos(struct ASTNodo *nodo, FILE *f, int nivel);
 void printCaso(struct ASTNodo *nodo, FILE *f, int nivel);
 void printLoopDoWhile(struct ASTNodo *nodo, FILE *f, int nivel);
+void printArgumentos(struct ASTNodo *nodo, FILE *f);
+void printLlamadaFuncion(struct ASTNodo *nodo, FILE *f);
+void printEspecificadores(struct ASTNodo *nodo, FILE *f);
 
 #endif //COMPILADOR_H

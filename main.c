@@ -59,6 +59,7 @@ int main(int argc, char *argv[]) {
     }
 
     char *archivoTemporal = "archivoTemp.tmp";
+    char *archivoParaEscanear = NULL;
 
     if (activarPreproceso) {
         printf("Ejecutando Preprocesador...\n");
@@ -72,12 +73,14 @@ int main(int argc, char *argv[]) {
         procesarArchivo(archivoFuente, f_temp);
         fclose(f_temp);
 
+        archivoParaEscanear = archivoTemporal;
     } else {
         printf("Preprocesador desactivado.\n");
+        archivoParaEscanear = archivoFuente;
     }
 
     printf("Pasando archivo procesado al Scanner (Flex)...\n");
-    yyin = fopen(archivoTemporal, "r");
+    yyin = fopen(archivoParaEscanear, "r");
     if (!yyin) {
         perror("Error al abrir el archivo temporal");
         return EXIT_FAILURE;
@@ -292,25 +295,26 @@ void printDeclaracionVariable(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
     imprimirIndentacion(f, nivel);
 
+    // Caso 1: Declaración con inicialización / asignación (ej. const unsigned int globalConfig = 100U;)
     if (nodo->izq != NULL && nodo->der != NULL) {
         struct ASTNodo *cabecera = nodo->izq;
 
-        if (cabecera->der != NULL && cabecera->der->tipo == nodoExpresion) {
-            if (cabecera->der->izq) {
-                prettyPrintAST(cabecera->der->izq, f, 0);
-                fprintf(f, " ");
-            }
-            if (cabecera->der->valorLexema) {
-                fprintf(f, "%s ", cabecera->der->valorLexema);
-            }
+        // Si la cabecera contiene la estructura con los especificadores y el ID
+        // (Estructura creada en: $$ = crearNodo(nodoDeclaracionVariable, cabecera, $4, "="); donde cabecera = crearNodo(nodoExpresion, idNodo, $1, $2.lexema))
+        if (cabecera->der != NULL) {
+            // cabecera->der contiene el árbol de especificadores (ej. const unsigned int)
+            printEspecificadores(cabecera->der, f);
+            fprintf(f, " ");
         }
 
+        // Imprimir el nombre de la variable (guardado en cabecera->izq->valorLexema o cabecera->valorLexema)
         if (cabecera->izq && cabecera->izq->valorLexema) {
             fprintf(f, "%s", cabecera->izq->valorLexema);
         } else if (cabecera->valorLexema) {
             fprintf(f, "%s", cabecera->valorLexema);
         }
 
+        // Revisar si es una inicialización de arreglo o una asignación normal
         if (nodo->valorLexema && strcmp(nodo->valorLexema, "array-init") == 0) {
             fprintf(f, "[] = { ");
             prettyPrintAST(nodo->der, f, 0);
@@ -321,30 +325,31 @@ void printDeclaracionVariable(struct ASTNodo *nodo, FILE *f, int nivel) {
             fprintf(f, ";\n");
         }
     }
-
+    // Caso 2: Declaración simple sin asignación (ej. int x; o arreglos como short s[10];)
     else if (nodo->izq != NULL) {
-        struct ASTNodo *idNodo = nodo->izq;
-        struct ASTNodo *tipoNodo = nodo->der;
+        struct ASTNodo *idNodo = nodo->izq;   // Contiene la cabecera o el ID
+        struct ASTNodo *tipoNodo = nodo->der; // Contiene el árbol de especificadores ($1)
 
-        if (tipoNodo && tipoNodo->izq) {
-            prettyPrintAST(tipoNodo->izq, f, 0);
+        // Imprimir los especificadores completos en orden correcto (ej. unsigned long long)
+        if (tipoNodo) {
+            printEspecificadores(tipoNodo, f);
             fprintf(f, " ");
         }
 
-        if (tipoNodo && tipoNodo->valorLexema) {
-            fprintf(f, "%s ", tipoNodo->valorLexema);
-        }
-
+        // Si es un arreglo (ej. "array")
         if (nodo->valorLexema && strcmp(nodo->valorLexema, "array") == 0) {
+            // idNodo->valorLexema tiene el nombre, idNodo->der tiene el tamaño del arreglo
             fprintf(f, "%s[", idNodo->valorLexema ? idNodo->valorLexema : "");
             if (idNodo->der) {
                 prettyPrintAST(idNodo->der, f, 0); // Tamaño del arreglo
             }
             fprintf(f, "];\n");
         } else {
+            // Declaración de variable simple sin inicializar (ej. int normal;)
             fprintf(f, "%s;\n", idNodo->valorLexema ? idNodo->valorLexema : "var");
         }
     }
+    // Caso 3: Nodo genérico de respaldo
     else {
         fprintf(f, "%s;\n", nodo->valorLexema ? nodo->valorLexema : "var");
     }
@@ -488,25 +493,98 @@ void printLoopWhile(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
+void printDeclaracionFor(struct ASTNodo *nodo, FILE *f) {
+    if (!nodo) return;
+
+    if (nodo->izq != NULL && nodo->der != NULL) {
+        struct ASTNodo *cabecera = nodo->izq;
+
+        // Tipo y modificadores
+        if (cabecera->der != NULL && cabecera->der->tipo == nodoExpresion) {
+            if (cabecera->der->izq) {
+                prettyPrintAST(cabecera->der->izq, f, 0);
+                fprintf(f, " ");
+            }
+            if (cabecera->der->valorLexema) {
+                fprintf(f, "%s ", cabecera->der->valorLexema);
+            }
+        }
+
+        // Nombre de la variable
+        if (cabecera->izq && cabecera->izq->valorLexema) {
+            fprintf(f, "%s", cabecera->izq->valorLexema);
+        } else if (cabecera->valorLexema) {
+            fprintf(f, "%s", cabecera->valorLexema);
+        }
+
+        fprintf(f, " = ");
+        prettyPrintAST(nodo->der, f, 0);
+    }
+    else if (nodo->izq != NULL) {
+        struct ASTNodo *idNodo = nodo->izq;
+        struct ASTNodo *tipoNodo = nodo->der;
+
+        if (tipoNodo && tipoNodo->valorLexema) {
+            fprintf(f, "%s ", tipoNodo->valorLexema);
+        }
+        fprintf(f, "%s", idNodo->valorLexema ? idNodo->valorLexema : "var");
+    }
+}
+
 void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel) {
+    if (!nodo) return;
+
     imprimirIndentacion(f, nivel);
     fprintf(f, "for (");
-    // nodo->izq contiene cabeceraFor (inicialización y condición/incremento)
-    prettyPrintAST(nodo -> izq, f, 0);
+
+    // nodo->izq contiene 'cabeceraFor'
+    struct ASTNodo *cabecera = nodo->izq;
+    if (cabecera) {
+        // 1. Inicialización (cabecera->izq)
+        if (cabecera->izq) {
+            if (cabecera->izq->tipo == nodoDeclaracionVariable) {
+                printDeclaracionFor(cabecera->izq, f);
+            } else {
+                prettyPrintAST(cabecera->izq, f, 0);
+            }
+        }
+        fprintf(f, "; ");
+
+        // 2. Condición e Incremento (cabecera->der contiene 'for-cond-inc')
+        struct ASTNodo *condInc = cabecera->der;
+        if (condInc) {
+            // Condición (condInc->izq)
+            if (condInc->izq) {
+                prettyPrintAST(condInc->izq, f, 0);
+            }
+            fprintf(f, "; ");
+
+            // Incremento (condInc->der)
+            if (condInc->der) {
+                prettyPrintAST(condInc->der, f, 0);
+            }
+        }
+    }
+
     fprintf(f, ")");
 
+    // Apertura de llaves según el estilo seleccionado (-g, -b, propio)
     if (estilo == estiloBSD) {
         fprintf(f, " {\n");
     } else if (estilo == estiloGNU) {
         fprintf(f, "\n");
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "{\n");
-    } else {
+    } else { // estilo propio
         fprintf(f, " {\n");
     }
 
-    prettyPrintAST(nodo -> der, f, (estilo == estiloGNU) ? nivel + 2 : nivel + 1);
+    // Cuerpo del bucle (nodo->der)
+    if (nodo->der) {
+        prettyPrintAST(nodo->der, f, (estilo == estiloGNU) ? nivel + 2 : nivel + 1);
+    }
 
+    // Cierre de llaves
     if (estilo == estiloGNU) {
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "}\n");
@@ -602,6 +680,14 @@ void printCaseSwitch(struct ASTNodo *nodo, FILE *f, int nivel) {
 void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
+    // Si el nodo es una llamada a función
+    if (nodo->tipo == nodoLlamadaFuncion) {
+        if (nivel > 0) imprimirIndentacion(f, nivel);
+        printLlamadaFuncion(nodo, f);
+        if (nivel > 0) fprintf(f, ";\n");
+        return;
+    }
+
     if (nodo->valorLexema && strcmp(nodo->valorLexema, "break") == 0) {
         if (nivel > 0) imprimirIndentacion(f, nivel);
         fprintf(f, "break;\n");
@@ -656,24 +742,48 @@ void printParametros(struct ASTNodo *nodo, FILE *f) {
         printParametros(nodo->der, f);
     }
     else {
-        // Caso: Nodo de un parámetro individual
-        // nodo->izq contiene el nodoTipo (ej. "int")
-        if (nodo->izq) {
-            // Si tiene modificador (ej. "const" en nodo->izq->izq)
-            if (nodo->izq->izq && nodo->izq->izq->valorLexema) {
-                fprintf(f, "%s ", nodo->izq->izq->valorLexema);
+            // Caso: Nodo de un parámetro individual
+            // nodo->izq contiene el árbol completo de especificadores (ej. const unsigned int)
+            if (nodo->izq) {
+                printEspecificadores(nodo->izq, f);
+                fprintf(f, " ");
             }
-            // Tipo de dato (ej. "int")
-            if (nodo->izq->valorLexema) {
-                fprintf(f, "%s ", nodo->izq->valorLexema);
-            }
-        }
 
-        // Nombre de la variable/parámetro (ej. "opcion")
-        if (nodo->valorLexema) {
-            fprintf(f, "%s", nodo->valorLexema);
+            // Nombre de la variable/parámetro (ej. "opcion")
+            if (nodo->valorLexema) {
+                fprintf(f, "%s", nodo->valorLexema);
+            }
         }
+}
+
+// Imprime recursivamente la lista de argumentos separados por comas
+void printArgumentos(struct ASTNodo *nodo, FILE *f) {
+    if (!nodo) return;
+
+    // Si es un nodo de concatenación de argumentos ("arg")
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "arg") == 0) {
+        printArgumentos(nodo->izq, f);
+        fprintf(f, ", ");
+        printArgumentos(nodo->der, f);
+    } else {
+        // Si es un argumento individual
+        prettyPrintAST(nodo, f, 0);
     }
+}
+
+// Imprime la llamada a función
+void printLlamadaFuncion(struct ASTNodo *nodo, FILE *f) {
+    if (!nodo) return;
+
+    // El nombre de la función está en nodo->valorLexema
+    fprintf(f, "%s(", nodo->valorLexema ? nodo->valorLexema : "funcion");
+
+    // Los argumentos están en nodo->izq (listaArgumentosOpt)
+    if (nodo->izq) {
+        printArgumentos(nodo->izq, f);
+    }
+
+    fprintf(f, ")");
 }
 
 void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel) {
@@ -686,8 +796,9 @@ void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel) {
         struct ASTNodo *cabecera = nodo->izq;
         struct ASTNodo *nodoTipo = cabecera->izq;
 
-        if (nodoTipo && nodoTipo->valorLexema) {
-            fprintf(f, "%s ", nodoTipo->valorLexema);
+        if (nodoTipo) {
+            printEspecificadores(nodoTipo, f);
+            fprintf(f, " ");
         }
 
         fprintf(f, "%s(", nodo->valorLexema ? nodo->valorLexema : "funcion");
@@ -728,6 +839,21 @@ void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
+// Imprime recursivamente los modificadores y tipos de izquierda a derecha
+void printEspecificadores(struct ASTNodo *nodo, FILE *f) {
+    if (!nodo) return;
+
+    // Si el nodo actual tiene un hijo izquierdo, en algunas estructuras de asignación 
+    // el orden de recursividad se invierte. Vamos a garantizar que imprima de forma estándar:
+    if (nodo->izq) {
+        printEspecificadores(nodo->izq, f);
+        fprintf(f, " ");
+    }
+    if (nodo->valorLexema) {
+        fprintf(f, "%s", nodo->valorLexema);
+    }
+}
+
 // Maneja el prettyprint
 void prettyPrintAST(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (nodo == NULL || f == NULL){
@@ -748,6 +874,9 @@ void prettyPrintAST(struct ASTNodo *nodo, FILE *f, int nivel) {
         //     prettyPrintAST(nodo->izq, f, nivel);
         //     prettyPrintAST(nodo->der, f, nivel);
         //     break;
+        case nodoLlamadaFuncion:
+            printLlamadaFuncion(nodo, f);
+            break;
 
         case nodoFuncion:
             printFuncion(nodo, f, nivel);

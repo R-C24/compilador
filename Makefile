@@ -25,6 +25,6 @@ $(TARGET): parser.tab.h lex.yy.c $(SRCS)
 
 # Limpieza del proyecto
 clean:
-	rm -f $(TARGET) lex.yy.c parser.tab.c parser.tab.h *.o *.aux *.log *.nav *.snm *.toc *.out *.pdf *.tex *.tmp *.vrb
+	rm -f $(TARGET) lex.yy.c parser.tab.c parser.tab.h *.o *.aux *.log *.nav *.snm *.toc *.out *.pdf *.tex *.tmp *.vrb *.pretty
 
 .PHONY: all clean

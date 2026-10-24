@@ -27,7 +27,7 @@ struct ASTNodo *raizAST = NULL;
 /* Definición de Tokens (Generan las constantes en parser.tab.h) */
 
 %token <tokenInfo> TokenInt TokenFloat TokenChar TokenString TokenID
-%token <tokenInfo> TokenModificador TokenTipoDato TokenSeparador
+%token <tokenInfo> TokenModificador TokenTipoDato
 %token <tokenInfo> TokenBreak TokenContinue TokenEnum TokenGoto TokenSizeof
 %token <tokenInfo> TokenStruct TokenTypedef TokenUnion TokenFor TokenIf
 %token <tokenInfo> TokenElse TokenSwitch TokenWhile TokenDo TokenCase
@@ -35,7 +35,7 @@ struct ASTNodo *raizAST = NULL;
 %token <tokenInfo> TokenOpBits TokenOpIgualdad TokenOpDesplazamiento
 %token <tokenInfo> TokenOpAditivos TokenOpMultiplicativos TokenOpInc TokenError
 
-%type <nodo> programa funcion retornar bloqueCodigo listaRelleno relleno condicionIf condicionElseIf loopWhile loopDoWhile loopFor inicializacionFor condicional caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos
+%type <nodo> programa funcion retornar bloqueCodigo listaRelleno relleno condicionIf condicionElseIf loopWhile loopDoWhile loopFor inicializacionFor condicional caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos llamadaFuncion especificadores
 
 %right TokenOpAsignacion
 %left TokenOpLogico
@@ -64,28 +64,14 @@ programa:
 ;
 
 funcion:
-    TokenTipoDato TokenID '(' listaParametros ')' ';'{
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, nodoTipo, $4, $2.lexema);
+    especificadores TokenID '(' listaParametros ')' ';' {
+        struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $4, $2.lexema);
         $$ = crearNodo(nodoFuncion, cabecera, NULL, $2.lexema);
         raizAST = $$;
     }
-    | listaModificadores TokenTipoDato TokenID '(' listaParametros ')' ';'{
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, nodoTipo, $5, $3.lexema);
-        $$ = crearNodo(nodoFuncion, cabecera, NULL, $3.lexema);
-        raizAST = $$;
-    }
-    | TokenTipoDato TokenID '(' listaParametros ')' '{' bloqueCodigo '}' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, nodoTipo, $4, $2.lexema);
+    | especificadores TokenID '(' listaParametros ')' '{' bloqueCodigo '}' {
+        struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $4, $2.lexema);
         $$ = crearNodo(nodoFuncion, cabecera, $7, $2.lexema);
-        raizAST = $$;
-    }
-    | listaModificadores TokenTipoDato TokenID '(' listaParametros ')' '{' bloqueCodigo '}' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, nodoTipo, $5, $3.lexema);
-        $$ = crearNodo(nodoFuncion, cabecera, $8, $3.lexema);
         raizAST = $$;
     }
 ;
@@ -246,14 +232,11 @@ listaParametros:
     ;
 
 parametro:
-    TokenTipoDato TokenID {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        $$ = crearNodo(nodoExpresion, nodoTipo, NULL, $2.lexema);
-    }
-    | TokenModificador TokenTipoDato TokenID {
-        struct ASTNodo *nodoMod = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, nodoMod, NULL, $2.lexema);
-        $$ = crearNodo(nodoExpresion, nodoTipo, NULL, $3.lexema);
+    especificadores TokenID {
+        // $1 contiene la estructura completa de los especificadores acumulados
+        // $2.lexema contiene el nombre del parámetro
+        $$ = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
+        raizAST = $$;
     }
     ;
 
@@ -266,31 +249,15 @@ listaDeclaracionVariables:
     ;
 
 declaracionVariable:
-    TokenTipoDato TokenID ';' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+    especificadores TokenID ';' {
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
-        $$ = crearNodo(nodoDeclaracionVariable, idNodo, nodoTipo, $2.lexema);
+        $$ = crearNodo(nodoDeclaracionVariable, idNodo, $1, $2.lexema);
         raizAST = $$;
     }
-    | TokenTipoDato TokenID '=' expresion ';' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+    | especificadores TokenID '=' expresion ';' {
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
-        struct ASTNodo *asignacion = crearNodo(nodoExpresion, idNodo, $4, "=");
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, idNodo, nodoTipo, $2.lexema);
+        struct ASTNodo *cabecera = crearNodo(nodoExpresion, idNodo, $1, $2.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, cabecera, $4, "=");
-        raizAST = $$;
-    }
-    | listaModificadores TokenTipoDato TokenID ';' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
-        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-        $$ = crearNodo(nodoDeclaracionVariable, idNodo, nodoTipo, $3.lexema);
-        raizAST = $$;
-    }
-    | listaModificadores TokenTipoDato TokenID '=' expresion ';' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
-        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, idNodo, nodoTipo, $3.lexema);
-        $$ = crearNodo(nodoDeclaracionVariable, cabecera, $5, "=");
         raizAST = $$;
     }
     | declaracionArrays {
@@ -300,24 +267,61 @@ declaracionVariable:
     ;
 
 declaracionArrays:
-    TokenTipoDato TokenID '[' TokenInt ']' ';' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+    especificadores TokenID '[' TokenInt ']' ';' {
         struct ASTNodo *tamano = crearNodo(nodoExpresion, NULL, NULL, $4.lexema);
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, nodoTipo, tamano, $2.lexema);
+        struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, tamano, $2.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, cabecera, NULL, "array");
         raizAST = $$;
     }
-    | TokenTipoDato TokenID '[' ']' '=' '{' listaElementos '}' ';' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, nodoTipo, NULL, $2.lexema);
+    | especificadores TokenID '[' ']' '=' '{' listaElementos '}' ';' {
+        struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, cabecera, $7, "array-init");
         raizAST = $$;
     }
-    | TokenTipoDato TokenID '[' TokenInt ']' '=' '{' listaElementos '}' ';' {
-        struct ASTNodo *nodoTipo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+    | especificadores TokenID '[' TokenInt ']' '=' '{' listaElementos '}' ';' {
         struct ASTNodo *tamano = crearNodo(nodoExpresion, NULL, NULL, $4.lexema);
-        struct ASTNodo *cabecera = crearNodo(nodoExpresion, nodoTipo, tamano, $2.lexema);
+        struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, tamano, $2.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, cabecera, $8, "array-init");
+        raizAST = $$;
+    }
+    ;
+
+especificadores:
+    TokenTipoDato {
+        $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        raizAST = $$;
+    }
+    | TokenModificador TokenTipoDato {
+        struct ASTNodo *mod = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        $$ = crearNodo(nodoExpresion, mod, NULL, $2.lexema);
+        raizAST = $$;
+    }
+    | TokenModificador {
+        $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        raizAST = $$;
+    }
+    | TokenModificador TokenModificador TokenTipoDato {
+        struct ASTNodo *mod1 = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        struct ASTNodo *mod2 = crearNodo(nodoExpresion, mod1, NULL, $2.lexema);
+        $$ = crearNodo(nodoExpresion, mod2, NULL, $3.lexema);
+        raizAST = $$;
+    }
+    | TokenModificador TokenModificador {
+        struct ASTNodo *mod1 = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        $$ = crearNodo(nodoExpresion, mod1, NULL, $2.lexema);
+        raizAST = $$;
+    }
+    | TokenModificador TokenModificador TokenModificador TokenTipoDato {
+        struct ASTNodo *mod1 = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        struct ASTNodo *mod2 = crearNodo(nodoExpresion, mod1, NULL, $2.lexema);
+        struct ASTNodo *mod3 = crearNodo(nodoExpresion, mod2, NULL, $3.lexema);
+        $$ = crearNodo(nodoExpresion, mod3, NULL, $4.lexema);
+        raizAST = $$;
+    }
+    | TokenModificador TokenModificador TokenModificador {
+        struct ASTNodo *mod1 = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        struct ASTNodo *mod2 = crearNodo(nodoExpresion, mod1, NULL, $2.lexema);
+        $$ = crearNodo(nodoExpresion, mod2, NULL, $3.lexema);
         raizAST = $$;
     }
     ;
@@ -369,17 +373,44 @@ expresion:
         raizAST = $$;
     }
     | TokenInt {
-        $$ = crearNodo(nodoExpresion, NULL, NULL, NULL);
+        $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         $$->valorNumerico = $1.valor;
         raizAST = $$;
     }
     | TokenFloat {
-        $$ = crearNodo(nodoExpresion, NULL, NULL, NULL);
+        $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         $$->valorNumerico = $1.valor;
         raizAST = $$;
     }
     | TokenChar {
         $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        raizAST = $$;
+    }
+    | TokenOpAditivos TokenInt {
+        $$ = crearNodo(nodoExpresion, NULL, NULL, NULL);
+        // Si el operador es '-', hacemos que el valor sea negativo (-1 * valor)
+        char temp[128];
+        snprintf(temp, sizeof(temp), "%s%s", $1.lexema, $2.lexema);
+        $$->valorLexema = strdup(temp);
+
+        if (strcmp($1.lexema, "-") == 0) {
+            $$->valorNumerico = -($2.valor);
+        } else {
+            $$->valorNumerico = $2.valor;
+        }
+        raizAST = $$;
+    }
+    | TokenOpAditivos TokenFloat {
+        $$ = crearNodo(nodoExpresion, NULL, NULL, NULL);
+        char temp[128];
+        snprintf(temp, sizeof(temp), "%s%s", $1.lexema, $2.lexema);
+        $$->valorLexema = strdup(temp);
+
+        if (strcmp($1.lexema, "-") == 0) {
+            $$->valorNumerico = -($2.valor);
+        } else {
+            $$->valorNumerico = $2.valor;
+        }
         raizAST = $$;
     }
     | TokenString {
@@ -431,7 +462,7 @@ expresion:
         raizAST = $$;
     }
     | TokenID '(' listaArgumentosOpt ')' {
-        $$ = crearNodo(nodoExpresion, $3, NULL, $1.lexema);
+        $$ = crearNodo(nodoLlamadaFuncion, $3, NULL, $1.lexema);
         raizAST = $$;
     }
 ;
