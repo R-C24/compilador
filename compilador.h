@@ -14,6 +14,7 @@ struct Macro{
 
 extern Macro macros[MaxMacros];
 extern int totalMacros;
+extern int totalErrores;
 
 void agregarMacro(char *nombre, char *valor);
 void traducirMacros(char *linea);
@@ -87,5 +88,6 @@ void printLoopDoWhile(struct ASTNodo *nodo, FILE *f, int nivel);
 void printArgumentos(struct ASTNodo *nodo, FILE *f);
 void printLlamadaFuncion(struct ASTNodo *nodo, FILE *f);
 void printEspecificadores(struct ASTNodo *nodo, FILE *f);
+void printListaIds(struct ASTNodo *nodo, FILE *f);
 
 #endif //COMPILADOR_H

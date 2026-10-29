@@ -22,7 +22,6 @@ int main(int argc, char *argv[]) {
     int reemplazarOriginal = 0; // Está desactivado por defecto.
     char *archivoFuente = NULL;
 
-    //REVISAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAR
     while ((opt = getopt(argc, argv, "prgb")) != -1) {
         switch (opt) {
             case 'p':
@@ -38,10 +37,13 @@ int main(int argc, char *argv[]) {
                 estilo = estiloBSD;
                 break;
             default:
-            //REVISAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAR
-            // fprintf(stderr, "Uso: %s [-p] [-r] [-g|-b] <archivo.c>\n", argv[0]);
-                printf("Error: No es una opción válida. Utilice '-p' para activar el preproceso, "
-                       "'-r nombreArchivo' REVISAAAAAAAAAR BIEN DESPUÉS QUÉ HACIA, '-g' para utilizar estilo GNU o '-b' para utilizar el estilo BSD  \n");
+            fprintf(stderr, "\nError: no es una opción válida.\n");
+                fprintf(stderr, "Uso correcto: %s [-p] [-r] [-g|-b] <archivo.c>\n\n", argv[0]);
+                fprintf(stderr, "Opciones disponibles:\n");
+                fprintf(stderr, "  -p    Activa el preprocesador opcional.\n");
+                fprintf(stderr, "  -r    Reemplaza el archivo fuente original con el prettyprint.\n");
+                fprintf(stderr, "  -g    Aplica el formato de Estilo GNU.\n");
+                fprintf(stderr, "  -b    Aplica el formato de Estilo BSD (Allman).\n\n");
             return EXIT_SUCCESS;
         }
     }
@@ -88,7 +90,7 @@ int main(int argc, char *argv[]) {
 
     printf("Iniciando análisis sintáctico con Bison...\n");
 
-    if (yyparse() == 0 && raizAST != NULL) {
+    if (yyparse() == 0 && totalErrores == 0 && raizAST != NULL) {
 
         char archivoSalida[512];
         if (reemplazarOriginal) {
@@ -104,13 +106,20 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // 4. Generar la reimpresión Prettyprint en el archivo
         prettyPrintAST(raizAST, fOut, 0);
         fclose(fOut);
         printf(" Prettyprint generado exitosamente en: %s\n", archivoSalida);
 
     } else {
         fprintf(stderr, "Error sintáctico: No se pudo generar la reimpresión.\n");
+    }
+
+    if (totalErrores > 0) {
+        fprintf(stderr, "\nCompilación fallida: se encontraron %d error(es).\n", totalErrores);
+        return EXIT_FAILURE;
+    } else {
+        printf("Compilación exitosa sin errores.\n");
+        return EXIT_SUCCESS;
     }
 
     fclose(yyin);
@@ -170,7 +179,7 @@ char *buscarMacroValida(char *linea, char *nombre){
             continue;
         }
 
-        // Omite contenido entre comillas "..." y '...'
+        // Omite contenido entre comillas
         if (!enCadena && linea[i] == '\'' && !esEscapado(linea, i)) {
             enChar = !enChar;
             continue;
@@ -236,13 +245,23 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
     }
 
     char linea[TamBuffer];
+    int numLinea = 0;
+
     while (fgets(linea, sizeof(linea), f_in)) {
+        numLinea++;
 
         if (strncmp(linea, "#include", 8) == 0) {
-            char subArchivo[MaxNombre];
+            char subArchivo[MaxNombre] = "";
+
             if (sscanf(linea, "#include \"%[^\"]\"", subArchivo) == 1) {
                 procesarArchivo(subArchivo, f_out);
                 continue;
+            }
+            else if (sscanf(linea, "#include <%[^>]>", subArchivo) == 1) {
+                continue;
+            } else {
+                fprintf(stderr, "Error de preprocesamiento: Directiva #include vacía o mal formada en '%s' (línea %d): %s", nombreArchivo, numLinea, linea);
+                exit(EXIT_FAILURE);
             }
         }
 
@@ -261,14 +280,6 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
         fputs(linea, f_out);
     }
     fclose(f_in);
-}
-
-void imprimirAST(struct ASTNodo *nodo, int nivel) {
-    if (!nodo) return;
-    for (int i = 0; i < nivel; i++) printf("  ");
-    printf("Tipo: %d, Lexema: %s, Valor: %.2f\n", nodo -> tipo, nodo -> valorLexema ? nodo -> valorLexema : "N/A", nodo -> valorNumerico);
-    imprimirAST(nodo -> izq, nivel + 1);
-    imprimirAST(nodo -> der, nivel + 1);
 }
 
 // Imprime los espacios correspondientes al nivel de indentación
@@ -291,30 +302,40 @@ void imprimirIndentacion(FILE *f, int nivel) {
     }
 }
 
+// Maneja el prettyprint para la declaración de variables
 void printDeclaracionVariable(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
+
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "declaracion-multiple") == 0) {
+        imprimirIndentacion(f, nivel);
+        // Los especificadores
+        if (nodo->izq) {
+            printEspecificadores(nodo->izq, f);
+            fprintf(f, " ");
+        }
+        // Lista de identificadores
+        printListaIds(nodo->der, f);
+        fprintf(f, ";\n");
+        return;
+    }
+
     imprimirIndentacion(f, nivel);
 
-    // Caso 1: Declaración con inicialización / asignación (ej. const unsigned int globalConfig = 100U;)
+    // Caso 1: Declaración con inicialización o asignación
     if (nodo->izq != NULL && nodo->der != NULL) {
         struct ASTNodo *cabecera = nodo->izq;
 
-        // Si la cabecera contiene la estructura con los especificadores y el ID
-        // (Estructura creada en: $$ = crearNodo(nodoDeclaracionVariable, cabecera, $4, "="); donde cabecera = crearNodo(nodoExpresion, idNodo, $1, $2.lexema))
         if (cabecera->der != NULL) {
-            // cabecera->der contiene el árbol de especificadores (ej. const unsigned int)
             printEspecificadores(cabecera->der, f);
             fprintf(f, " ");
         }
 
-        // Imprimir el nombre de la variable (guardado en cabecera->izq->valorLexema o cabecera->valorLexema)
         if (cabecera->izq && cabecera->izq->valorLexema) {
             fprintf(f, "%s", cabecera->izq->valorLexema);
         } else if (cabecera->valorLexema) {
             fprintf(f, "%s", cabecera->valorLexema);
         }
 
-        // Revisar si es una inicialización de arreglo o una asignación normal
         if (nodo->valorLexema && strcmp(nodo->valorLexema, "array-init") == 0) {
             fprintf(f, "[] = { ");
             prettyPrintAST(nodo->der, f, 0);
@@ -325,46 +346,57 @@ void printDeclaracionVariable(struct ASTNodo *nodo, FILE *f, int nivel) {
             fprintf(f, ";\n");
         }
     }
-    // Caso 2: Declaración simple sin asignación (ej. int x; o arreglos como short s[10];)
+    // Caso 2: Declaración sin asignación
     else if (nodo->izq != NULL) {
-        struct ASTNodo *idNodo = nodo->izq;   // Contiene la cabecera o el ID
-        struct ASTNodo *tipoNodo = nodo->der; // Contiene el árbol de especificadores ($1)
+        struct ASTNodo *idNodo = nodo->izq;
+        struct ASTNodo *tipoNodo = nodo->der;
 
-        // Imprimir los especificadores completos en orden correcto (ej. unsigned long long)
         if (tipoNodo) {
             printEspecificadores(tipoNodo, f);
             fprintf(f, " ");
         }
 
-        // Si es un arreglo (ej. "array")
         if (nodo->valorLexema && strcmp(nodo->valorLexema, "array") == 0) {
-            // idNodo->valorLexema tiene el nombre, idNodo->der tiene el tamaño del arreglo
             fprintf(f, "%s[", idNodo->valorLexema ? idNodo->valorLexema : "");
             if (idNodo->der) {
-                prettyPrintAST(idNodo->der, f, 0); // Tamaño del arreglo
+                prettyPrintAST(idNodo->der, f, 0);
             }
             fprintf(f, "];\n");
         } else {
-            // Declaración de variable simple sin inicializar (ej. int normal;)
             fprintf(f, "%s;\n", idNodo->valorLexema ? idNodo->valorLexema : "var");
         }
     }
-    // Caso 3: Nodo genérico de respaldo
     else {
         fprintf(f, "%s;\n", nodo->valorLexema ? nodo->valorLexema : "var");
     }
 }
 
+// Maneja el prettyprint para las lista de identificadores
+void printListaIds(struct ASTNodo *nodo, FILE *f) {
+    if (!nodo) return;
+
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "lista-ids") == 0) {
+        printListaIds(nodo->izq, f);
+        fprintf(f, ", ");
+        printListaIds(nodo->der, f);
+    }
+    else if (nodo->valorLexema && strcmp(nodo->valorLexema, "var-simple") == 0) {
+        if (nodo->izq && nodo->izq->valorLexema) {
+            fprintf(f, "%s", nodo->izq->valorLexema);
+        }
+    }
+    else if (nodo->valorLexema && strcmp(nodo->valorLexema, "var-init") == 0) {
+        prettyPrintAST(nodo->izq, f, 0);
+    }
+}
+
+// Maneja el prettyprint para las condiciones if
 void printCondicionIf(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
-    // Detectar si es un nodo combinativo if-else
-    // Si nodo->valorLexema es "if-else", nodo->izq es el sub-nodo IF y nodo->der es el ELSE
     if (nodo->valorLexema && strcmp(nodo->valorLexema, "if-else") == 0) {
-        // 1. Imprimir la parte del IF
         printCondicionIf(nodo->izq, f, nivel);
 
-        // 2. Imprimir el ELSE
         if (estilo == estiloBSD) {
             fprintf(f, " else");
         } else if (estilo == estiloGNU) {
@@ -384,10 +416,10 @@ void printCondicionIf(struct ASTNodo *nodo, FILE *f, int nivel) {
             fprintf(f, " {\n");
         }
 
-        // Cuerpo del ELSE
+        // Cuerpo del else
         prettyPrintAST(nodo->der, f, (estilo == estiloGNU) ? nivel + 2 : nivel + 1);
 
-        // Cierre de llave del ELSE
+        // Cierre de llave del else
         if (estilo == estiloGNU) {
             imprimirIndentacion(f, nivel + 1);
             fprintf(f, "}\n");
@@ -398,15 +430,13 @@ void printCondicionIf(struct ASTNodo *nodo, FILE *f, int nivel) {
         return;
     }
 
-    // --- Caso Normal: IF Simple ---
+    // Caso: if simple
     imprimirIndentacion(f, nivel);
     fprintf(f, "if (");
 
-    // Imprimir la condición evaluada (en línea recta)
     prettyPrintAST(nodo->izq, f, 0);
     fprintf(f, ")");
 
-    // Apertura de llaves según el estilo
     if (estilo == estiloBSD) {
         fprintf(f, " {\n");
     } else if (estilo == estiloGNU) {
@@ -417,10 +447,10 @@ void printCondicionIf(struct ASTNodo *nodo, FILE *f, int nivel) {
         fprintf(f, " {\n");
     }
 
-    // Bloque del cuerpo del IF
+    // Bloque del cuerpo del if
     prettyPrintAST(nodo->der, f, (estilo == estiloGNU) ? nivel + 2 : nivel + 1);
 
-    // Cierre de llave del IF
+    // Cierre de llave del if
     if (estilo == estiloGNU) {
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "}\n");
@@ -430,13 +460,13 @@ void printCondicionIf(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
+// Maneja el prettyprint para un loop do-while
 void printLoopDoWhile(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
     imprimirIndentacion(f, nivel);
     fprintf(f, "do");
 
-    // Apertura de llaves según el estilo
     if (estilo == estiloBSD) {
         fprintf(f, " {\n");
     } else if (estilo == estiloGNU) {
@@ -444,15 +474,13 @@ void printLoopDoWhile(struct ASTNodo *nodo, FILE *f, int nivel) {
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "{\n");
     } else { // estilo propio
-        fprintf(f, "\n");
-        imprimirIndentacion(f, nivel);
-        fprintf(f, "{\n");
+        fprintf(f, " {\n");
     }
 
-    // 1. Cuerpo del do-while (ubicado en nodo->izq)
+    // Cuerpo del do-while
     prettyPrintAST(nodo->izq, f, (estilo == estiloGNU) ? nivel + 2 : nivel + 1);
 
-    // 2. Cierre de llaves e inicio de la condición while
+    // Inicio de la condición while
     if (estilo == estiloGNU) {
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "} while (");
@@ -461,11 +489,12 @@ void printLoopDoWhile(struct ASTNodo *nodo, FILE *f, int nivel) {
         fprintf(f, "} while (");
     }
 
-    // 3. Condición del bucle (ubicada en nodo->der)
+    // Condición del bucle
     prettyPrintAST(nodo->der, f, 0);
     fprintf(f, ");\n");
 }
 
+// Maneja el prettyprint para un loop do-while
 void printLoopWhile(struct ASTNodo *nodo, FILE *f, int nivel) {
     imprimirIndentacion(f, nivel);
     fprintf(f, "while (");
@@ -493,6 +522,7 @@ void printLoopWhile(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
+// Maneja el prettyprint para la declaración un bucle for
 void printDeclaracionFor(struct ASTNodo *nodo, FILE *f) {
     if (!nodo) return;
 
@@ -531,16 +561,17 @@ void printDeclaracionFor(struct ASTNodo *nodo, FILE *f) {
     }
 }
 
+// Maneja el prettyprint para el bucle for
 void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
     imprimirIndentacion(f, nivel);
     fprintf(f, "for (");
 
-    // nodo->izq contiene 'cabeceraFor'
+    //La cabecera del for
     struct ASTNodo *cabecera = nodo->izq;
     if (cabecera) {
-        // 1. Inicialización (cabecera->izq)
+        // Inicialización
         if (cabecera->izq) {
             if (cabecera->izq->tipo == nodoDeclaracionVariable) {
                 printDeclaracionFor(cabecera->izq, f);
@@ -550,16 +581,15 @@ void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel) {
         }
         fprintf(f, "; ");
 
-        // 2. Condición e Incremento (cabecera->der contiene 'for-cond-inc')
         struct ASTNodo *condInc = cabecera->der;
         if (condInc) {
-            // Condición (condInc->izq)
+            // Condición
             if (condInc->izq) {
                 prettyPrintAST(condInc->izq, f, 0);
             }
             fprintf(f, "; ");
 
-            // Incremento (condInc->der)
+            // Incremento
             if (condInc->der) {
                 prettyPrintAST(condInc->der, f, 0);
             }
@@ -568,7 +598,6 @@ void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel) {
 
     fprintf(f, ")");
 
-    // Apertura de llaves según el estilo seleccionado (-g, -b, propio)
     if (estilo == estiloBSD) {
         fprintf(f, " {\n");
     } else if (estilo == estiloGNU) {
@@ -579,12 +608,11 @@ void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel) {
         fprintf(f, " {\n");
     }
 
-    // Cuerpo del bucle (nodo->der)
+    // Cuerpo del bucle
     if (nodo->der) {
         prettyPrintAST(nodo->der, f, (estilo == estiloGNU) ? nivel + 2 : nivel + 1);
     }
 
-    // Cierre de llaves
     if (estilo == estiloGNU) {
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "}\n");
@@ -594,39 +622,37 @@ void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
-// Imprime un caso individual (case X: o default:)
+// Maneja el prettyprint para un caso del switch
 void printCaso(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
     imprimirIndentacion(f, nivel);
 
-    // Caso 1: case <elemento>:
+    // Caso: case <elemento>:
     if (nodo->izq) {
         fprintf(f, "case ");
         prettyPrintAST(nodo->izq, f, 0);
         fprintf(f, ":\n");
     }
-    // Caso 2: default:
+    // Caso: default:
     else {
         fprintf(f, "default:\n");
     }
 
-    // Imprimir el bloque de código del caso con un nivel más de sangría
     if (nodo->der) {
         prettyPrintAST(nodo->der, f, nivel + 1);
     }
 }
 
-// Recorre la lista de casos dentro del switch
+// Maneja el prettyprint para imprimir una lista de casos
 void printListaCasos(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
-    // Si es un nodo contenedor de lista de casos
     if (nodo->tipo == nodoListaCasos || (nodo->valorLexema && strcmp(nodo->valorLexema, "lista-casos") == 0)) {
         if (nodo->izq) printListaCasos(nodo->izq, f, nivel);
         if (nodo->der) printListaCasos(nodo->der, f, nivel);
     }
-    // Si es un caso individual
+
     else if (nodo->tipo == nodoCaso) {
         printCaso(nodo, f, nivel);
     }
@@ -635,18 +661,16 @@ void printListaCasos(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
-// Función Principal para la sentencia switch
+// Maneja el prettyprint para imprimir la sentencia switch
 void printCaseSwitch(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
     imprimirIndentacion(f, nivel);
     fprintf(f, "switch (");
 
-    // Imprimir la expresión dentro del switch (ej. opcion)
     prettyPrintAST(nodo->izq, f, 0);
     fprintf(f, ")");
 
-    // Apertura de llaves según el estilo seleccionado
     if (estilo == estiloBSD) {
         fprintf(f, " {\n");
     } else if (estilo == estiloGNU) {
@@ -654,20 +678,16 @@ void printCaseSwitch(struct ASTNodo *nodo, FILE *f, int nivel) {
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "{\n");
     } else { // estilo propio
-        fprintf(f, "\n");
-        imprimirIndentacion(f, nivel);
-        fprintf(f, "{\n");
+        fprintf(f, " {\n");
     }
 
-    // Determinar el nivel de sangría interno para los casos
+    // Determina el nivel de sangría interno
     int nivelCasos = (estilo == estiloGNU) ? nivel + 2 : nivel + 1;
 
-    // Imprimir los casos contenidos en el hijo derecho
     if (nodo->der) {
         printListaCasos(nodo->der, f, nivelCasos);
     }
 
-    // Cierre de llaves según el estilo
     if (estilo == estiloGNU) {
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "}\n");
@@ -677,14 +697,31 @@ void printCaseSwitch(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
+// Maneja el prettyprint para imprimir una expresión
 void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
-    // Si el nodo es una llamada a función
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "()") == 0) {
+        if (nivel > 0) imprimirIndentacion(f, nivel);
+        fprintf(f, "(");
+        prettyPrintAST(nodo->izq, f, 0);
+        fprintf(f, ")");
+        if (nivel > 0) fprintf(f, ";\n");
+        return;
+    }
+
     if (nodo->tipo == nodoLlamadaFuncion) {
         if (nivel > 0) imprimirIndentacion(f, nivel);
         printLlamadaFuncion(nodo, f);
         if (nivel > 0) fprintf(f, ";\n");
+        return;
+    }
+
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "casteo") == 0) {
+        fprintf(f, "(");
+        printEspecificadores(nodo->izq, f); // Imprime el tipo
+        fprintf(f, ") ");
+        prettyPrintAST(nodo->der, f, 0);   // Imprime la expresión casteada
         return;
     }
 
@@ -694,18 +731,17 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
         return;
     }
 
-    // Si la expresión está al nivel de instrucción (nivel > 0), se indenta
     if (nivel > 0) {
         imprimirIndentacion(f, nivel);
     }
 
     if (nodo->izq != NULL && nodo->der != NULL) {
-        // Expresión binaria (ej. x = x + 5 o x < y)
+        // Expresión binaria
         prettyPrintAST(nodo->izq, f, 0);
         fprintf(f, " %s ", nodo->valorLexema ? nodo->valorLexema : "op");
         prettyPrintAST(nodo->der, f, 0);
     } else if (nodo->izq != NULL) {
-        // Unaria / Return
+        // Return
         if (nodo->valorLexema && strcmp(nodo->valorLexema, "return") == 0) {
             fprintf(f, "return ");
         } else if (nodo->valorLexema) {
@@ -713,7 +749,7 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
         }
         prettyPrintAST(nodo->izq, f, 0);
     } else {
-        // Hoja: Identificador o Literal numérico
+        //  Identificador o literal numérico
         if (nodo->valorLexema != NULL) {
             fprintf(f, "%s", nodo->valorLexema);
         } else {
@@ -721,64 +757,51 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
         }
     }
 
-    // Si era una sentencia/instrucción independiente dentro de un bloque, rematar con ';' y '\n'
     if (nivel > 0) {
         fprintf(f, ";\n");
     }
 }
 
+// Maneja el prettyprint para imprimir los parámetros
 void printParametros(struct ASTNodo *nodo, FILE *f) {
     if (!nodo) return;
 
-    // Si es un nodo de unión de lista ("lista-parametros")
     if (nodo->valorLexema && strcmp(nodo->valorLexema, "lista-parametros") == 0) {
-        // Imprimir parámetro o sublista izquierda
         printParametros(nodo->izq, f);
-
-        // Imprimir coma separadora
         fprintf(f, ", ");
-
-        // Imprimir parámetro derecho
         printParametros(nodo->der, f);
     }
     else {
-            // Caso: Nodo de un parámetro individual
-            // nodo->izq contiene el árbol completo de especificadores (ej. const unsigned int)
             if (nodo->izq) {
                 printEspecificadores(nodo->izq, f);
                 fprintf(f, " ");
             }
 
-            // Nombre de la variable/parámetro (ej. "opcion")
             if (nodo->valorLexema) {
                 fprintf(f, "%s", nodo->valorLexema);
             }
         }
 }
 
-// Imprime recursivamente la lista de argumentos separados por comas
+// Maneja el prettyprint para imprimir los argumentos
 void printArgumentos(struct ASTNodo *nodo, FILE *f) {
     if (!nodo) return;
 
-    // Si es un nodo de concatenación de argumentos ("arg")
     if (nodo->valorLexema && strcmp(nodo->valorLexema, "arg") == 0) {
         printArgumentos(nodo->izq, f);
         fprintf(f, ", ");
         printArgumentos(nodo->der, f);
     } else {
-        // Si es un argumento individual
         prettyPrintAST(nodo, f, 0);
     }
 }
 
-// Imprime la llamada a función
+// Maneja el prettyprint para imprimir la llamada a una función
 void printLlamadaFuncion(struct ASTNodo *nodo, FILE *f) {
     if (!nodo) return;
 
-    // El nombre de la función está en nodo->valorLexema
     fprintf(f, "%s(", nodo->valorLexema ? nodo->valorLexema : "funcion");
 
-    // Los argumentos están en nodo->izq (listaArgumentosOpt)
     if (nodo->izq) {
         printArgumentos(nodo->izq, f);
     }
@@ -786,12 +809,13 @@ void printLlamadaFuncion(struct ASTNodo *nodo, FILE *f) {
     fprintf(f, ")");
 }
 
+// Maneja el prettyprint para imprimir una función
 void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel) {
     if (!nodo) return;
 
     imprimirIndentacion(f, nivel);
 
-    // 1. Cabecera (Tipo, Nombre y Parámetros)
+    // Cabecera (Tipo, Nombre y Parámetros)
     if (nodo->izq) {
         struct ASTNodo *cabecera = nodo->izq;
         struct ASTNodo *nodoTipo = cabecera->izq;
@@ -811,7 +835,6 @@ void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel) {
         fprintf(f, "%s()", nodo->valorLexema ? nodo->valorLexema : "funcion");
     }
 
-    // 2. Prototipo vs Cuerpo
     if (nodo->der == NULL) {
         fprintf(f, ";\n");
     } else {
@@ -825,10 +848,8 @@ void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel) {
             fprintf(f, " {\n");
         }
 
-        // Llamada recursiva al cuerpo (nodoBloqueCodigo)
         prettyPrintAST(nodo->der, f, (estilo == estiloGNU) ? nivel + 2 : nivel + 1);
 
-        // Cierre de llaves
         if (estilo == estiloGNU) {
             imprimirIndentacion(f, nivel + 1);
             fprintf(f, "}\n\n");
@@ -839,12 +860,10 @@ void printFuncion(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
-// Imprime recursivamente los modificadores y tipos de izquierda a derecha
+// Maneja el prettyprint para imprimir los modificadores
 void printEspecificadores(struct ASTNodo *nodo, FILE *f) {
     if (!nodo) return;
 
-    // Si el nodo actual tiene un hijo izquierdo, en algunas estructuras de asignación 
-    // el orden de recursividad se invierte. Vamos a garantizar que imprima de forma estándar:
     if (nodo->izq) {
         printEspecificadores(nodo->izq, f);
         fprintf(f, " ");
@@ -862,18 +881,6 @@ void prettyPrintAST(struct ASTNodo *nodo, FILE *f, int nivel) {
 
     switch (nodo -> tipo) {
 
-        // case nodoPrograma:
-        //     prettyPrintAST(nodo->izq, f, nivel);
-        //     prettyPrintAST(nodo->der, f, nivel);
-        //     break;
-        // case nodoBloqueCodigo:
-        //     prettyPrintAST(nodo->izq, f, nivel);
-        //     prettyPrintAST(nodo->der, f, nivel);
-        //     break;
-        // case nodoRelleno:
-        //     prettyPrintAST(nodo->izq, f, nivel);
-        //     prettyPrintAST(nodo->der, f, nivel);
-        //     break;
         case nodoLlamadaFuncion:
             printLlamadaFuncion(nodo, f);
             break;
@@ -918,7 +925,6 @@ void prettyPrintAST(struct ASTNodo *nodo, FILE *f, int nivel) {
             printCaso(nodo, f, nivel);
             break;
 
-        // Recorrido secuencial de listas/bloques
         default:
             prettyPrintAST(nodo -> izq, f, nivel);
             prettyPrintAST(nodo -> der, f, nivel);

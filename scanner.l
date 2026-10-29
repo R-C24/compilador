@@ -96,7 +96,7 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 ({DIGITO}+\.{DIGITO}*|\.{DIGITO}+|{DIGITO}+)[eE][+-]? { return crearToken(TokenError, 0); }
 
     /* 7. Capturar secuencia de 3 o más símbolos de operador */
-[+\-*/%&|^~!=<>?:]{3,} {return (crearToken(TokenError, 0));}
+[+\-*/%&|^~!=<>?:]{4,} {return (crearToken(TokenError, 0));}
 
 
     /* Tokens válidos */
@@ -105,8 +105,8 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 "?"  {return '?'; }
 
     /* Operadores de asignación */
-"=" { return '='; }
 "+="|"-="|"*="|"/="|"%="|"&="|"^="|"|="|"<<="|">>=" {return (crearToken(TokenOpAsignacion, 0));}
+"=" { return '='; }
 
     /* Operadores lógicos */
 "&&"|"||"  {return (crearToken(TokenOpLogico, 0));}
@@ -156,11 +156,12 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 ")" { return ')'; }
 "[" { return '['; }
 "]" { return ']'; }
-"#" { return '#'; }
 ":" { return ':'; }
 
     /* Caracteres fuera de ASCII */
 [\x80-\xFF]+ { return (  crearToken(TokenError, 0)); }
+
+^#.*(\n)?       { /* Ignorar directivas de preprocesador*/ }
 
 .  { return (crearToken(TokenError, 0)); }
 
