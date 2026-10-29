@@ -258,6 +258,7 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
                 continue;
             }
             else if (sscanf(linea, "#include <%[^>]>", subArchivo) == 1) {
+                fputc('\n', f_out);
                 continue;
             } else {
                 fprintf(stderr, "Error de preprocesamiento: Directiva #include vacía o mal formada en '%s' (línea %d): %s", nombreArchivo, numLinea, linea);
@@ -741,13 +742,21 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
         fprintf(f, " %s ", nodo->valorLexema ? nodo->valorLexema : "op");
         prettyPrintAST(nodo->der, f, 0);
     } else if (nodo->izq != NULL) {
-        // Return
+        // Unaria / Return / Incrementos o Decrementos (ej. c++ o ++c)
         if (nodo->valorLexema && strcmp(nodo->valorLexema, "return") == 0) {
             fprintf(f, "return ");
-        } else if (nodo->valorLexema) {
-            fprintf(f, "%s ", nodo->valorLexema);
+            prettyPrintAST(nodo->izq, f, 0);
+        } 
+        else if (nodo->valorLexema && (strcmp(nodo->valorLexema, "++") == 0 || strcmp(nodo->valorLexema, "--") == 0)) {
+            prettyPrintAST(nodo->izq, f, 0);
+            fprintf(f, "%s", nodo->valorLexema);
         }
-        prettyPrintAST(nodo->izq, f, 0);
+        else {
+            if (nodo->valorLexema) {
+                fprintf(f, "%s ", nodo->valorLexema);
+            }
+            prettyPrintAST(nodo->izq, f, 0);
+        }
     } else {
         //  Identificador o literal numérico
         if (nodo->valorLexema != NULL) {
