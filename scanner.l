@@ -174,6 +174,11 @@ int crearToken(int codToken, double valor) {
     yylval.tokenInfo.linea = lineaAct;
     yylval.tokenInfo.columna = columnaAct - yyleng;
 
+    if (codToken == TokenError) {
+        fprintf(stderr, "Error léxico en línea %d, columna %d: token o identificador no válido '%s'\n",
+                lineaAct, columnaAct - yyleng, yytext);
+    }
+
     return codToken;
 }
 

@@ -37,7 +37,7 @@ struct ASTNodo *raizAST = NULL;
 %token <tokenInfo> TokenOpBits TokenOpIgualdad TokenOpDesplazamiento
 %token <tokenInfo> TokenOpAditivos TokenOpMultiplicativos TokenOpInc TokenError
 
-%type <nodo> programa funcion retornar bloqueCodigo sentenciaBloque listaRelleno relleno condicionIf condicionElseIf loopWhile loopDoWhile loopFor inicializacionFor condicional caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos llamadaFuncion especificadores listaIds
+%type <nodo> programa funcion retornar bloqueCodigo sentenciaBloque sentenciaSimple condicionIf loopWhile loopDoWhile loopFor inicializacionFor condicional caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos llamadaFuncion especificadores listaIds
 
 %right TokenOpAsignacion
 %left TokenOpLogico
@@ -98,7 +98,13 @@ funcion:
         $$ = crearNodo(nodoFuncion, cabecera, $7, $2.lexema);
         raizAST = $$;
     }
-    /* Comportamiento GCC: Error fatal si encuentra la llave '{' sin haber cerrado el paréntesis ')' */
+    | especificadores TokenID '(' listaParametros ')' sentenciaBloque {
+        yyerror("se esperaba '{' al inicio del cuerpo de la función");
+        yyerrok;
+        struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $4, $2.lexema);
+        $$ = crearNodo(nodoFuncion, cabecera, $6, $2.lexema);
+        raizAST = $$;
+    }
     | especificadores TokenID '(' listaParametros '{' {
         yyerror("falta ')' en la declaración de la función");
         YYABORT; // Detiene la compilación inmediatamente, bloqueando errores en cascada
@@ -151,13 +157,13 @@ bloqueCodigo:
 
 sentenciaBloque:
       declaracionVariable { $$ = $1; raizAST = $$; }
-    | expresion ';'       { $$ = $1; raizAST = $$; }
-    | condicionIf         { $$ = $1; raizAST = $$; }
-    | caseSwitch          { $$ = $1; raizAST = $$; }
-    | loopWhile           { $$ = $1; raizAST = $$; }
-    | loopFor             { $$ = $1; raizAST = $$; }
-    | loopDoWhile         { $$ = $1; raizAST = $$; }
-    | retornar            { $$ = $1; raizAST = $$; }
+    | sentenciaSimple     { $$ = $1; raizAST = $$; }
+    | funcion {
+        yyerror("se esperaba '}' al final de la función anterior");
+        yyerrok;
+        $$ = $1;
+        raizAST = $$;
+    }
     | error ';' {
         yyerrok;
         $$ = NULL;
@@ -168,27 +174,42 @@ sentenciaBloque:
     }
 ;
 
-listaRelleno:
-    /* Por si la función no tiene sentencias */ { $$ = NULL; raizAST = $$;}
-    | listaRelleno relleno {
-        $$ = crearNodo(nodoRelleno, $1, $2, "sentencias");
+
+/* Sentencia que puede ir sola como cuerpo de if/else (con o sin llaves) */
+sentenciaSimple:
+      expresion ';'        { $$ = $1; raizAST = $$; }
+    | condicionIf          { $$ = $1; raizAST = $$; }
+    | caseSwitch           { $$ = $1; raizAST = $$; }
+    | loopWhile            { $$ = $1; raizAST = $$; }
+    | loopFor              { $$ = $1; raizAST = $$; }
+    | loopDoWhile          { $$ = $1; raizAST = $$; }
+    | retornar             { $$ = $1; raizAST = $$; }
+    | TokenBreak ';' {
+        $$ = crearNodo(nodoExpresion, NULL, NULL, "break");
         raizAST = $$;
     }
-    ;
-
-relleno:
-    expresion ';' { $$ = $1; raizAST = $$;}
-    | condicionIf { $$ = $1; raizAST = $$;}
-    | caseSwitch { $$ = $1; raizAST = $$;}
-    | loopWhile { $$ = $1; raizAST = $$;}
-    | loopFor { $$ = $1; raizAST = $$;}
-    | loopDoWhile { $$ = $1; raizAST = $$;}
-    | retornar { $$ = $1; raizAST = $$;}
-    ;
+    | TokenContinue ';' {
+        $$ = crearNodo(nodoExpresion, NULL, NULL, "continue");
+        raizAST = $$;
+    }
+    | '{' bloqueCodigo '}' { $$ = $2; raizAST = $$; }
+    | ';'                  { $$ = NULL; }
+    | TokenElse sentenciaSimple {
+        yyerror("'else' sin un 'if' previo");
+        yyerrok;
+        $$ = $2;
+        raizAST = $$;
+    }
+;
 
 condicionIf:
-    TokenIf '(' expresion ')' '{' bloqueCodigo '}' {
-        $$ = crearNodo(nodoCondicionIf, $3, $6, "if");
+    TokenIf '(' expresion ')' sentenciaSimple {
+        $$ = crearNodo(nodoCondicionIf, $3, $5, "if");
+        raizAST = $$;
+    }
+    | TokenIf '(' expresion ')' sentenciaSimple TokenElse sentenciaSimple {
+        struct ASTNodo *ifParcial = crearNodo(nodoCondicionIf, $3, $5, "if");
+        $$ = crearNodo(nodoCondicionIf, ifParcial, $7, "if-else");
         raizAST = $$;
     }
     | TokenIf '(' expresion '{' bloqueCodigo '}' {
@@ -197,33 +218,22 @@ condicionIf:
         $$ = crearNodo(nodoCondicionIf, $3, $5, "if-error");
         raizAST = $$;
     }
+    | TokenIf '(' expresion sentenciaSimple {
+        yyerror("se esperaba ')' después de la condición del 'if'");
+        yyerrok;
+        $$ = crearNodo(nodoCondicionIf, $3, $4, "if-error");
+        raizAST = $$;
+    }
     | TokenIf error '{' bloqueCodigo '}' {
         yyerrok;
         $$ = crearNodo(nodoCondicionIf, NULL, $4, "if-error");
         raizAST = $$;
     }
-    | TokenIf '(' expresion ')' '{' bloqueCodigo '}' TokenElse '{' bloqueCodigo '}' {
-        struct ASTNodo *ifParcial = crearNodo(nodoCondicionIf, $3, $6, "if");
-        $$ = crearNodo(nodoCondicionIf, ifParcial, $10, "if-else");
-        raizAST = $$;
-    }
-;
-
-condicionElseIf:
-    TokenElse TokenIf '(' expresion ')' '{' bloqueCodigo '}' {
-        $$ = crearNodo(nodoCondicionIf, $4, $7, "else-if");
-        raizAST = $$;
-    }
-    | condicionElseIf TokenElse TokenIf '(' expresion ')' '{' bloqueCodigo '}' {
-        struct ASTNodo *nuevoElseIf = crearNodo(nodoCondicionIf, $5, $8, "else-if");
-        $$ = crearNodo(nodoCondicionIf, $1, nuevoElseIf, "cadena-else-if");
-        raizAST = $$;
-   }
 ;
 
 loopWhile:
-    TokenWhile '(' expresion ')' '{' bloqueCodigo '}' {
-        $$ = crearNodo(nodoLoopWhile, $3, $6, "while");
+    TokenWhile '(' expresion ')' sentenciaSimple {
+        $$ = crearNodo(nodoLoopWhile, $3, $5, "while");
         raizAST = $$;
     }
     | TokenWhile error '{' bloqueCodigo '}' {
@@ -231,11 +241,11 @@ loopWhile:
         $$ = crearNodo(nodoLoopWhile, NULL, $4, "while-error");
         raizAST = $$;
     }
-    ;
+;
 
 loopDoWhile:
-    TokenDo '{' bloqueCodigo '}' TokenWhile '(' expresion ')' ';' {
-        $$ = crearNodo(nodoLoopDoWhile, $3, $7, "do-while");
+    TokenDo sentenciaSimple TokenWhile '(' expresion ')' ';' {
+        $$ = crearNodo(nodoLoopDoWhile, $2, $5, "do-while");
         raizAST = $$;
     }
     | TokenDo '{' bloqueCodigo '}' TokenWhile '(' expresion ')' {
@@ -247,11 +257,11 @@ loopDoWhile:
 ;
 
 loopFor:
-    // Cabecera For bien formada
-    TokenFor '(' inicializacionFor condicional ';' condicional ')' '{' bloqueCodigo '}' {
+    // Cabecera For bien formada (permite cuerpo con o sin llaves mediante sentenciaSimple)
+    TokenFor '(' inicializacionFor condicional ';' condicional ')' sentenciaSimple {
         struct ASTNodo *condInc = crearNodo(nodoLoopFor, $4, $6, "for-cond-inc");
         struct ASTNodo *cabeceraFor = crearNodo(nodoLoopFor, $3, condInc, "for-cabecera");
-        $$ = crearNodo(nodoLoopFor, cabeceraFor, $9, "for");
+        $$ = crearNodo(nodoLoopFor, cabeceraFor, $8, "for");
         raizAST = $$;
     }
     // Recuperación de un For con paréntesis balanceados pero mal formado por dentro
