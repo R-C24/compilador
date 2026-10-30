@@ -13,6 +13,7 @@ extern FILE *yyin;
 int totalErrores = 0;
 
 void yyerror(const char *s);
+struct ASTNodo *crearNodoUnario(const char *op, struct ASTNodo *operando);
 
 struct ASTNodo *raizAST = NULL;
 %}
@@ -39,12 +40,14 @@ struct ASTNodo *raizAST = NULL;
 
 %type <nodo> programa funcion retornar bloqueCodigo sentenciaBloque sentenciaSimple condicionIf loopWhile loopDoWhile loopFor inicializacionFor condicional caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos llamadaFuncion especificadores listaIds
 
-%right TokenOpAsignacion
+%right '=' TokenOpAsignacion
+%right '?' ':'
 %left TokenOpLogico
 %left TokenOpBits
 %left TokenOpIgualdad TokenOpDesplazamiento
 %left TokenOpAditivos TokenOpMultiplicativos
-%right TokenOpInc
+%right UNARIO
+%left TokenOpInc '['
 
 /* Regla inicial de la gramática */
 %start programa
@@ -248,16 +251,16 @@ loopDoWhile:
         $$ = crearNodo(nodoLoopDoWhile, $2, $5, "do-while");
         raizAST = $$;
     }
-    | TokenDo '{' bloqueCodigo '}' TokenWhile '(' expresion ')' {
+    | TokenDo sentenciaSimple TokenWhile '(' expresion ')' {
         yyerror("falta ';' al final del do-while");
         yyerrok;
-        $$ = crearNodo(nodoLoopDoWhile, $3, $7, "do-while");
+        $$ = crearNodo(nodoLoopDoWhile, $2, $5, "do-while");
         raizAST = $$;
     }
 ;
 
 loopFor:
-    // Cabecera For bien formada (permite cuerpo con o sin llaves mediante sentenciaSimple)
+    // Cabecera For bien formada
     TokenFor '(' inicializacionFor condicional ';' condicional ')' sentenciaSimple {
         struct ASTNodo *condInc = crearNodo(nodoLoopFor, $4, $6, "for-cond-inc");
         struct ASTNodo *cabeceraFor = crearNodo(nodoLoopFor, $3, condInc, "for-cabecera");
@@ -265,9 +268,9 @@ loopFor:
         raizAST = $$;
     }
     // Recuperación de un For con paréntesis balanceados pero mal formado por dentro
-    | TokenFor '(' error ')' '{' bloqueCodigo '}' {
+    | TokenFor '(' error ')' sentenciaSimple {
         yyerrok;
-        $$ = crearNodo(nodoLoopFor, NULL, $6, "for-error");
+        $$ = crearNodo(nodoLoopFor, NULL, $5, "for-error");
         raizAST = $$;
     }
     // Recuperación total de un For con paréntesis desbalanceados o totalmente corrupto
@@ -301,14 +304,6 @@ caseSwitch:
         $$ = crearNodo(nodoCaseSwitch, $3, listaCompleta, "switch-default");
         raizAST = $$;
     }
-    | TokenSwitch '(' expresion ')' '{' listaCasos TokenDefault ':' bloqueCodigo TokenBreak ';' '}' {
-        struct ASTNodo *nodoBreak = crearNodo(nodoExpresion, NULL, NULL, "break");
-        struct ASTNodo *cuerpoConBreak = crearNodo(nodoBloqueCodigo, $9, nodoBreak, "bloque-break");
-        struct ASTNodo *nodoDef = crearNodo(nodoCaso, NULL, cuerpoConBreak, "default-break");
-        struct ASTNodo *listaCompleta = crearNodo(nodoListaCasos, $6, nodoDef, "lista-casos");
-        $$ = crearNodo(nodoCaseSwitch, $3, listaCompleta, "switch-default");
-        raizAST = $$;
-    }
     ;
 
 listaCasos:
@@ -320,13 +315,7 @@ listaCasos:
 ;
 
 caso:
-    TokenCase elemento ':' bloqueCodigo TokenBreak ';' {
-        struct ASTNodo *nodoBreak = crearNodo(nodoExpresion, NULL, NULL, "break");
-        struct ASTNodo *cuerpoConBreak = crearNodo(nodoBloqueCodigo, $4, nodoBreak, "bloque-break");
-        $$ = crearNodo(nodoCaso, $2, cuerpoConBreak, "case-break");
-        raizAST = $$;
-    }
-    | TokenCase elemento ':' bloqueCodigo {
+    TokenCase elemento ':' bloqueCodigo {
         $$ = crearNodo(nodoCaso, $2, $4, "case");
         raizAST = $$;
     }
@@ -526,33 +515,6 @@ expresion:
         $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         raizAST = $$;
     }
-    | TokenOpAditivos TokenInt {
-        $$ = crearNodo(nodoExpresion, NULL, NULL, NULL);
-        // Si el operador es '-', hacemos que el valor sea negativo (-1 * valor)
-        char temp[128];
-        snprintf(temp, sizeof(temp), "%s%s", $1.lexema, $2.lexema);
-        $$->valorLexema = strdup(temp);
-
-        if (strcmp($1.lexema, "-") == 0) {
-            $$->valorNumerico = -($2.valor);
-        } else {
-            $$->valorNumerico = $2.valor;
-        }
-        raizAST = $$;
-    }
-    | TokenOpAditivos TokenFloat {
-        $$ = crearNodo(nodoExpresion, NULL, NULL, NULL);
-        char temp[128];
-        snprintf(temp, sizeof(temp), "%s%s", $1.lexema, $2.lexema);
-        $$->valorLexema = strdup(temp);
-
-        if (strcmp($1.lexema, "-") == 0) {
-            $$->valorNumerico = -($2.valor);
-        } else {
-            $$->valorNumerico = $2.valor;
-        }
-        raizAST = $$;
-    }
     | TokenString {
         $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         raizAST = $$;
@@ -561,7 +523,7 @@ expresion:
         $$ = crearNodo(nodoExpresion, $2, NULL, "()");
         raizAST = $$;
     }
-    | '(' especificadores ')' expresion {
+    | '(' especificadores ')' expresion %prec UNARIO {
         $$ = crearNodo(nodoExpresion, $2, $4, "casteo");
         raizAST = $$;
     }
@@ -597,14 +559,60 @@ expresion:
         $$ = crearNodo(nodoExpresion, $1, $3, $2.lexema);
         raizAST = $$;
     }
-    | TokenID TokenOpInc {
-        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        $$ = crearNodo(nodoExpresion, idNodo, NULL, $2.lexema);
+    /* --- Operadores unarios prefijo --- */
+    | TokenOpAditivos expresion %prec UNARIO {
+        $$ = crearNodoUnario($1.lexema, $2);
         raizAST = $$;
     }
-    | TokenOpInc TokenID {
-        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
-        $$ = crearNodo(nodoExpresion, idNodo, NULL, $1.lexema);
+    | '!' expresion %prec UNARIO {
+        $$ = crearNodoUnario("!", $2);
+        raizAST = $$;
+    }
+    | TokenOpBits expresion %prec UNARIO {
+        /* Solo '&' y '~' son unarios; '|' y '^' no lo son */
+        if (strcmp($1.lexema, "&") != 0 && strcmp($1.lexema, "~") != 0) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "se esperaba una expresión antes de '%s'", $1.lexema);
+            yyerror(msg);
+        }
+        $$ = crearNodoUnario($1.lexema, $2);
+        raizAST = $$;
+    }
+    | TokenOpMultiplicativos expresion %prec UNARIO {
+        /* Solo '*' (desreferencia) es unario; '/' y '%' no lo son */
+        if (strcmp($1.lexema, "*") != 0) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "se esperaba una expresión antes de '%s'", $1.lexema);
+            yyerror(msg);
+        }
+        $$ = crearNodoUnario($1.lexema, $2);
+        raizAST = $$;
+    }
+    | TokenOpInc expresion %prec UNARIO {
+        $$ = crearNodoUnario($1.lexema, $2);
+        raizAST = $$;
+    }
+    | TokenSizeof expresion %prec UNARIO {
+        $$ = crearNodoUnario("sizeof ", $2);
+        raizAST = $$;
+    }
+    | TokenSizeof '(' especificadores ')' %prec UNARIO {
+        $$ = crearNodo(nodoExpresion, $3, NULL, "sizeof-tipo");
+        raizAST = $$;
+    }
+    /* --- Postfijos --- */
+    | expresion TokenOpInc {
+        $$ = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
+        raizAST = $$;
+    }
+    | expresion '[' expresion ']' {
+        $$ = crearNodo(nodoExpresion, $1, $3, "[]");
+        raizAST = $$;
+    }
+    /* --- Condicional ternario: cond ? a : b --- */
+    | expresion '?' expresion ':' expresion {
+        struct ASTNodo *ramas = crearNodo(nodoExpresion, $3, $5, ":");
+        $$ = crearNodo(nodoExpresion, $1, ramas, "?");
         raizAST = $$;
     }
     | TokenID '(' listaArgumentosOpt ')' {
@@ -612,6 +620,7 @@ expresion:
         raizAST = $$;
     }
 ;
+
 
 listaArgumentosOpt:
     { $$ = NULL; raizAST = $$; }
@@ -628,6 +637,13 @@ listaArgumentos:
 
 %%
 
+/* Crea un nodo de operador unario prefijo; el prettyprint reconoce el prefijo "unario:" */
+struct ASTNodo *crearNodoUnario(const char *op, struct ASTNodo *operando) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "unario:%s", op);
+    return crearNodo(nodoExpresion, operando, NULL, buf);
+}
+
 struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *der, char *lexema) {
     struct ASTNodo *nuevo = (struct ASTNodo*) malloc(sizeof(struct ASTNodo));
     if (!nuevo) {
@@ -643,10 +659,60 @@ struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *de
 }
 
 
-/* Manejo de errores sintácticos */
+static void imprimirLineaErrorGCC(const char *archivo, int numLinea, int numColumna, int longitudToken) {
+    FILE *f = fopen(archivo, "r");
+    if (!f) return;
+
+    char lineaBuffer[1024];
+    int lineaActual = 1;
+
+    // Navegar hasta la línea donde ocurrió el error
+    while (fgets(lineaBuffer, sizeof(lineaBuffer), f)) {
+        if (lineaActual == numLinea) {
+            // Remover el salto de línea al final del buffer si existe
+            lineaBuffer[strcspn(lineaBuffer, "\r\n")] = 0;
+
+            // 1. Imprimir la línea de código con el número de línea alineado
+            fprintf(stderr, " %5d | %s\n", numLinea, lineaBuffer);
+
+            // 2. Imprimir la barra vertical de margen
+            fprintf(stderr, "       | ");
+
+            // 3. Imprimir espacios hasta la columna del error
+            for (int i = 1; i < numColumna; i++) {
+                // Preservar tabulaciones si la línea original tenía '\t'
+                if (lineaBuffer[i - 1] == '\t') {
+                    fputc('\t', stderr);
+                } else {
+                    fputc(' ', stderr);
+                }
+            }
+
+            // 4. Imprimir el indicador '^' y el subrayado '~' para la longitud del token
+            fputc('^', stderr);
+            for (int i = 1; i < longitudToken; i++) {
+                fputc('~', stderr);
+            }
+            fputc('\n', stderr);
+
+            break;
+        }
+        lineaActual++;
+    }
+    fclose(f);
+}
+
+/* Función yyerror adaptada al formato nativo de GCC */
 void yyerror(const char *s) {
     totalErrores++;
 
-    fprintf(stderr, "Error sintáctico [#%d] en línea %d, columna %d: %s\n",
-            totalErrores, lineaAct, yylval.tokenInfo.columna, s);
+    int columna = yylval.tokenInfo.columna > 0 ? yylval.tokenInfo.columna : columnaAct;
+    int lenToken = yyleng > 0 ? yyleng : 1;
+    const char *archivo = nombreArchivoFuente ? nombreArchivoFuente : "fuente.c";
+
+    // Encabezado estándar de GCC
+    fprintf(stderr, "%s:%d:%d: \033[1;31merror:\033[0m %s\n", archivo, lineaAct, columna, s);
+
+    // Muestra del código fuente y el cursor ^
+    imprimirLineaErrorGCC(archivo, lineaAct, columna, lenToken);
 }

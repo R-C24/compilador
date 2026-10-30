@@ -732,21 +732,56 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
         return;
     }
 
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "continue") == 0) {
+        if (nivel > 0) imprimirIndentacion(f, nivel);
+        fprintf(f, "continue;\n");
+        return;
+    }
+
     if (nivel > 0) {
         imprimirIndentacion(f, nivel);
     }
 
     if (nodo->izq != NULL && nodo->der != NULL) {
-        // Expresión binaria
-        prettyPrintAST(nodo->izq, f, 0);
-        fprintf(f, " %s ", nodo->valorLexema ? nodo->valorLexema : "op");
-        prettyPrintAST(nodo->der, f, 0);
+        if (nodo->valorLexema && strcmp(nodo->valorLexema, "[]") == 0) {
+            // Acceso a arreglo: a[i]
+            prettyPrintAST(nodo->izq, f, 0);
+            fprintf(f, "[");
+            prettyPrintAST(nodo->der, f, 0);
+            fprintf(f, "]");
+        } else if (nodo->valorLexema && strcmp(nodo->valorLexema, "?") == 0) {
+            // Ternario: cond ? a : b  (der->izq = a, der->der = b)
+            prettyPrintAST(nodo->izq, f, 0);
+            fprintf(f, " ? ");
+            prettyPrintAST(nodo->der->izq, f, 0);
+            fprintf(f, " : ");
+            prettyPrintAST(nodo->der->der, f, 0);
+        } else {
+            // Expresión binaria
+            prettyPrintAST(nodo->izq, f, 0);
+            fprintf(f, " %s ", nodo->valorLexema ? nodo->valorLexema : "op");
+            prettyPrintAST(nodo->der, f, 0);
+        }
     } else if (nodo->izq != NULL) {
         // Unaria / Return / Incrementos o Decrementos (ej. c++ o ++c)
-        if (nodo->valorLexema && strcmp(nodo->valorLexema, "return") == 0) {
+        if (nodo->valorLexema && strncmp(nodo->valorLexema, "unario:", 7) == 0) {
+            // Operador unario prefijo: -x, !x, *p, &x, ++x, sizeof x
+            fprintf(f, "%s", nodo->valorLexema + 7);
+            // Evita que "- -a" se imprima como "--a"
+            if (nodo->izq->valorLexema && strncmp(nodo->izq->valorLexema, "unario:", 7) == 0) {
+                fprintf(f, " ");
+            }
+            prettyPrintAST(nodo->izq, f, 0);
+        }
+        else if (nodo->valorLexema && strcmp(nodo->valorLexema, "sizeof-tipo") == 0) {
+            fprintf(f, "sizeof(");
+            printEspecificadores(nodo->izq, f);
+            fprintf(f, ")");
+        }
+        else if (nodo->valorLexema && strcmp(nodo->valorLexema, "return") == 0) {
             fprintf(f, "return ");
             prettyPrintAST(nodo->izq, f, 0);
-        } 
+        }
         else if (nodo->valorLexema && (strcmp(nodo->valorLexema, "++") == 0 || strcmp(nodo->valorLexema, "--") == 0)) {
             prettyPrintAST(nodo->izq, f, 0);
             fprintf(f, "%s", nodo->valorLexema);
