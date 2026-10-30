@@ -36,14 +36,14 @@ int main(int argc, char *argv[]) {
                 estilo = estiloBSD;
                 break;
             default:
-            fprintf(stderr, "\nError: no es una opción válida.\n");
+                fprintf(stderr, "\nError: no es una opción válida.\n");
                 fprintf(stderr, "Uso correcto: %s [-p] [-r] [-g|-b] <archivo.c>\n\n", argv[0]);
                 fprintf(stderr, "Opciones disponibles:\n");
                 fprintf(stderr, "  -p    Activa el preprocesador opcional.\n");
                 fprintf(stderr, "  -r    Reemplaza el archivo fuente original con el prettyprint.\n");
                 fprintf(stderr, "  -g    Aplica el formato de Estilo GNU.\n");
-                fprintf(stderr, "  -b    Aplica el formato de Estilo BSD (Allman).\n\n");
-            return EXIT_SUCCESS;
+                fprintf(stderr, "  -b    Aplica el formato de Estilo BSD.\n\n");
+                return EXIT_FAILURE;
         }
     }
 
@@ -372,7 +372,6 @@ void printDeclaracionVariable(struct ASTNodo *nodo, FILE *f, int nivel) {
 }
 
 // Maneja el prettyprint para las lista de identificadores
-// Maneja el prettyprint para las lista de identificadores
 void printListaIds(struct ASTNodo *nodo, FILE *f) {
     if (!nodo) return;
 
@@ -389,13 +388,12 @@ void printListaIds(struct ASTNodo *nodo, FILE *f) {
     else if (nodo->valorLexema && strcmp(nodo->valorLexema, "var-init") == 0) {
         prettyPrintAST(nodo->izq, f, 0);
     }
-    // Soporte para punteros (*p, **pp)
+    // Soporte para punteros
     else if (nodo->valorLexema && strcmp(nodo->valorLexema, "var-puntero") == 0) {
         struct ASTNodo *unario = nodo->izq;
         if (unario && unario->valorLexema && strncmp(unario->valorLexema, "unario:", 7) == 0) {
             // Imprime el asterisco
             fprintf(f, "%s", unario->valorLexema + 7);
-            // Llama recursivamente para imprimir el resto (var-simple, var-init u otro var-puntero)
             printListaIds(unario->izq, f);
         }
     }
@@ -533,14 +531,22 @@ void printLoopWhile(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 }
 
-// Maneja el prettyprint para la declaración un bucle for
+// Maneja el prettyprint para la declaración dentro de un bucle for
 void printDeclaracionFor(struct ASTNodo *nodo, FILE *f) {
     if (!nodo) return;
+
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "declaracion-multiple") == 0) {
+        if (nodo->izq) {
+            printEspecificadores(nodo->izq, f);
+            fprintf(f, " ");
+        }
+        printListaIds(nodo->der, f);
+        return;
+    }
 
     if (nodo->izq != NULL && nodo->der != NULL) {
         struct ASTNodo *cabecera = nodo->izq;
 
-        // Tipo y modificadores
         if (cabecera->der != NULL && cabecera->der->tipo == nodoExpresion) {
             if (cabecera->der->izq) {
                 prettyPrintAST(cabecera->der->izq, f, 0);
@@ -550,14 +556,11 @@ void printDeclaracionFor(struct ASTNodo *nodo, FILE *f) {
                 fprintf(f, "%s ", cabecera->der->valorLexema);
             }
         }
-
-        // Nombre de la variable
         if (cabecera->izq && cabecera->izq->valorLexema) {
             fprintf(f, "%s", cabecera->izq->valorLexema);
         } else if (cabecera->valorLexema) {
             fprintf(f, "%s", cabecera->valorLexema);
         }
-
         fprintf(f, " = ");
         prettyPrintAST(nodo->der, f, 0);
     }
@@ -579,22 +582,25 @@ void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel) {
     imprimirIndentacion(f, nivel);
     fprintf(f, "for (");
 
-    //La cabecera del for
     struct ASTNodo *cabecera = nodo->izq;
+
     if (cabecera) {
-        // Inicialización
         if (cabecera->izq) {
             if (cabecera->izq->tipo == nodoDeclaracionVariable) {
                 printDeclaracionFor(cabecera->izq, f);
+                fprintf(f, "; ");
             } else {
                 prettyPrintAST(cabecera->izq, f, 0);
+                fprintf(f, "; ");
             }
+        } else {
+            // Inicialización vacía
+            fprintf(f, "; ");
         }
-        fprintf(f, "; ");
 
         struct ASTNodo *condInc = cabecera->der;
         if (condInc) {
-            // Condición
+            // Condicional
             if (condInc->izq) {
                 prettyPrintAST(condInc->izq, f, 0);
             }
@@ -609,21 +615,23 @@ void printLoopFor(struct ASTNodo *nodo, FILE *f, int nivel) {
 
     fprintf(f, ")");
 
+    // Apertura del bloque de código según el estilo
     if (estilo == estiloBSD) {
         fprintf(f, " {\n");
     } else if (estilo == estiloGNU) {
         fprintf(f, "\n");
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "{\n");
-    } else { // estilo propio
+    } else {
         fprintf(f, " {\n");
     }
 
-    // Cuerpo del bucle
+    // Cuerpo del bucle for
     if (nodo->der) {
         prettyPrintAST(nodo->der, f, (estilo == estiloGNU) ? nivel + 2 : nivel + 1);
     }
 
+    // Cierre de llaves del bloque
     if (estilo == estiloGNU) {
         imprimirIndentacion(f, nivel + 1);
         fprintf(f, "}\n");
@@ -729,10 +737,12 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 
     if (nodo->valorLexema && strcmp(nodo->valorLexema, "casteo") == 0) {
+        if (nivel > 0) imprimirIndentacion(f, nivel);
         fprintf(f, "(");
         printEspecificadores(nodo->izq, f); // Imprime el tipo
         fprintf(f, ") ");
         prettyPrintAST(nodo->der, f, 0);   // Imprime la expresión casteada
+        if (nivel > 0) fprintf(f, ";\n");
         return;
     }
 
@@ -749,18 +759,22 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
     }
 
     if (nivel > 0) {
+        // Añade un salto de línea estético antes de un return para separar bloques
+        if (nodo->valorLexema && strcmp(nodo->valorLexema, "return") == 0) {
+            fprintf(f, "\n");
+        }
         imprimirIndentacion(f, nivel);
     }
 
     if (nodo->izq != NULL && nodo->der != NULL) {
         if (nodo->valorLexema && strcmp(nodo->valorLexema, "[]") == 0) {
-            // Acceso a arreglo: a[i]
+            // Acceso a arreglo a[i]
             prettyPrintAST(nodo->izq, f, 0);
             fprintf(f, "[");
             prettyPrintAST(nodo->der, f, 0);
             fprintf(f, "]");
         } else if (nodo->valorLexema && strcmp(nodo->valorLexema, "?") == 0) {
-            // Ternario: cond ? a : b
+            // Ternario cond ? a : b
             prettyPrintAST(nodo->izq, f, 0);
             fprintf(f, " ? ");
             prettyPrintAST(nodo->der->izq, f, 0);
@@ -773,11 +787,10 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
             prettyPrintAST(nodo->der, f, 0);
         }
     } else if (nodo->izq != NULL) {
-        // Bloque Unario limpio (Return, prefijos, postfijos)
+        // Bloque Unario
         if (nodo->valorLexema && strncmp(nodo->valorLexema, "unario:", 7) == 0) {
             fprintf(f, "%s", nodo->valorLexema + 7);
-            
-            // Espaciado dinámico únicamente para conflictos de operadores aritméticos (ej. - -x vs --x)
+
             char opActual = nodo->valorLexema[7];
             if ((opActual == '-' || opActual == '+') && nodo->izq->valorLexema && strncmp(nodo->izq->valorLexema, "unario:", 7) == 0) {
                 if (nodo->izq->valorLexema[7] == opActual) {
@@ -797,18 +810,21 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
         }
         else if (nodo->valorLexema && (strcmp(nodo->valorLexema, "++") == 0 || strcmp(nodo->valorLexema, "--") == 0)) {
             // Postfijo
+            fprintf(f, "\n");
+            imprimirIndentacion(f, nivel);
             prettyPrintAST(nodo->izq, f, 0);
             fprintf(f, "%s", nodo->valorLexema);
         }
         else {
-            // Resto de los casos unarios/asociativos
             if (nodo->valorLexema) {
+                fprintf(f, "\n");
+                imprimirIndentacion(f, nivel);
                 fprintf(f, "%s ", nodo->valorLexema);
             }
             prettyPrintAST(nodo->izq, f, 0);
         }
     } else {
-        // Hoja: Identificador o literal numérico
+        // Identificador o literal numérico
         if (nodo->valorLexema != NULL) {
             fprintf(f, "%s", nodo->valorLexema);
         } else {

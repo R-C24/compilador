@@ -4,7 +4,7 @@
 #include <string.h>
 #include "compilador.h"
 
-/* Declaraciones necesarias para conectar con Flex */
+/* Declaraciones necesarias para conectar con el scanner (Flex) */
 extern int yylex(void);
 extern int lineaAct;
 extern int columnaAct;
@@ -23,14 +23,14 @@ struct ASTNodo *raizAST = NULL;
 
 %define parse.error verbose
 
-/* Definición de los datos que puede almacenar un token/nodo en el parser */
+/* Definición de los datos que puede almacenar un nodo en el parser */
 %union {
     InfoToken tokenInfo;
     struct ASTNodo *nodo;
 }
 
 
-/* Definición de Tokens (Generan las constantes en parser.tab.h) */
+/* Definición de Tokens*/
 
 %token <tokenInfo> TokenInt TokenFloat TokenChar TokenString TokenID
 %token <tokenInfo> TokenModificador TokenTipoDato
@@ -52,12 +52,12 @@ struct ASTNodo *raizAST = NULL;
 %right UNARIO
 %left TokenOpInc '['
 
-/* Regla inicial de la gramática */
+/* Regla inicial */
 %start programa
 
 %%
 
-/* --- Reglas Gramaticales Iniciales --- */
+/* Reglas Gramaticales */
 
 programa:
     /* Por si el archivo está vacío */
@@ -73,19 +73,19 @@ programa:
         $$ = crearNodo(nodoPrograma, $1, $2, "programa");
         raizAST = $$;
     }
-    /* CAPTURA DIRECTA: Llave '}' huérfana fuera de cualquier función */
+    /* Llave '}' huérfana fuera de cualquier función */
     | programa '}' {
         yyerror("sintaxis inválida: '}' extra o fuera de cualquier función");
         yyerrok;
         $$ = $1; // Conserva lo procesado hasta el momento
         raizAST = $$;
     }
-    /* TOLERANCIA: Puntos y coma extra a nivel global (común en C) */
+    /* Puntos y coma extra a nivel global */
     | programa ';' {
         $$ = $1;
         raizAST = $$;
     }
-    /* RECUPERACIÓN GENERAL: Para cualquier otro token corrupto a nivel global */
+    /* Para cualquier otro token corrupto a nivel global */
     | programa error ';' {
         yyerrok;
         $$ = $1;
@@ -113,7 +113,7 @@ funcion:
     }
     | especificadores TokenID '(' listaParametros '{' {
         yyerror("falta ')' en la declaración de la función");
-        YYABORT; // Detiene la compilación inmediatamente, bloqueando errores en cascada
+        YYABORT; // Bloquea errores en cascada
     }
     | especificadores TokenID '(' error '}' {
         yyerror("error de sintaxis en la firma de la función");
@@ -151,7 +151,6 @@ bloqueCodigo:
     }
     | bloqueCodigo sentenciaBloque
     {
-        // Si ya hay un bloque previo, los encadenamos; si no, inicializamos con la nueva sentencia
         if ($1 == NULL) {
             $$ = $2;
         } else {
@@ -181,7 +180,7 @@ sentenciaBloque:
 ;
 
 
-/* Sentencia que puede ir sola como cuerpo de if/else (con o sin llaves) */
+/* Sentencia que puede ir sola como cuerpo de if/else */
 sentenciaSimple:
       expresion ';'        { $$ = $1; raizAST = $$; }
     | condicionIf          { $$ = $1; raizAST = $$; }
@@ -270,13 +269,13 @@ loopFor:
         $$ = crearNodo(nodoLoopFor, cabeceraFor, $8, "for");
         raizAST = $$;
     }
-    // Recuperación de un For con paréntesis balanceados pero mal formado por dentro
+    // For con paréntesis balanceados pero mal formado por dentro
     | TokenFor '(' error ')' sentenciaSimple {
         yyerrok;
         $$ = crearNodo(nodoLoopFor, NULL, $5, "for-error");
         raizAST = $$;
     }
-    // Recuperación total de un For con paréntesis desbalanceados o totalmente corrupto
+    // For con paréntesis desbalanceados o totalmente corrupto
     | TokenFor error '{' bloqueCodigo '}' {
         yyerrok;
         $$ = crearNodo(nodoLoopFor, NULL, $4, "for-error");
@@ -293,7 +292,6 @@ inicializacionFor:
 condicional:
     { $$ = NULL; raizAST = $$; }
     | expresion { $$ = $1; raizAST = $$; }
-    /* Eliminar "error" genérico de aquí */
 ;
 
 caseSwitch:
@@ -338,7 +336,6 @@ parametro:
         $$ = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
         raizAST = $$;
     }
-    /* Soporte para parámetros como: int *x o char **argv */
     | especificadores TokenOpMultiplicativos TokenID {
         if (strcmp($2.lexema, "*") == 0) {
             struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
@@ -383,7 +380,7 @@ listaIds:
         $$ = crearNodo(nodoDeclaracionVariable, idNodo, NULL, "var-simple");
         raizAST = $$;
     }
-    /* Soporte para declaración de punteros: int *p; o int **p; */
+    /* Soporte para declaración de punteros */
     | TokenOpMultiplicativos listaIds {
         if (strcmp($1.lexema, "*") == 0) {
             struct ASTNodo *nodoPtr = crearNodoUnario("*", $2);
@@ -579,7 +576,7 @@ expresion:
         $$ = crearNodo(nodoExpresion, $1, $3, $2.lexema);
         raizAST = $$;
     }
-    /* --- Operadores unarios prefijo --- */
+    /* Operadores unarios prefijo */
     | TokenOpAditivos expresion %prec UNARIO {
         $$ = crearNodoUnario($1.lexema, $2);
         raizAST = $$;
@@ -589,7 +586,6 @@ expresion:
         raizAST = $$;
     }
     | TokenOpBits expresion %prec UNARIO {
-        /* Solo '&' y '~' son unarios; '|' y '^' no lo son */
         if (strcmp($1.lexema, "&") != 0 && strcmp($1.lexema, "~") != 0) {
             char msg[96];
             snprintf(msg, sizeof(msg), "se esperaba una expresión antes de '%s'", $1.lexema);
@@ -599,7 +595,6 @@ expresion:
         raizAST = $$;
     }
     | TokenOpMultiplicativos expresion %prec UNARIO {
-        /* Solo '*' (desreferencia) es unario; '/' y '%' no lo son */
         if (strcmp($1.lexema, "*") != 0) {
             char msg[96];
             snprintf(msg, sizeof(msg), "se esperaba una expresión antes de '%s'", $1.lexema);
@@ -620,7 +615,7 @@ expresion:
         $$ = crearNodo(nodoExpresion, $3, NULL, "sizeof-tipo");
         raizAST = $$;
     }
-    /* --- Postfijos --- */
+    /* Postfijos */
     | expresion TokenOpInc {
         $$ = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
         raizAST = $$;
@@ -629,7 +624,7 @@ expresion:
         $$ = crearNodo(nodoExpresion, $1, $3, "[]");
         raizAST = $$;
     }
-    /* --- Condicional ternario: cond ? a : b --- */
+    /* Condicional ternario: cond ? a : b */
     | expresion '?' expresion ':' expresion {
         struct ASTNodo *ramas = crearNodo(nodoExpresion, $3, $5, ":");
         $$ = crearNodo(nodoExpresion, $1, ramas, "?");
@@ -657,7 +652,7 @@ listaArgumentos:
 
 %%
 
-/* Crea un nodo de operador unario prefijo; el prettyprint reconoce el prefijo "unario:" */
+/* Crea un nodo de operador unario prefijo */
 struct ASTNodo *crearNodoUnario(const char *op, struct ASTNodo *operando) {
     char buf[64];
     snprintf(buf, sizeof(buf), "unario:%s", op);
@@ -686,21 +681,14 @@ static void imprimirLineaErrorGCC(const char *archivo, int numLinea, int numColu
     char lineaBuffer[1024];
     int lineaActual = 1;
 
-    // Navegar hasta la línea donde ocurrió el error
     while (fgets(lineaBuffer, sizeof(lineaBuffer), f)) {
         if (lineaActual == numLinea) {
-            // Remover el salto de línea al final del buffer si existe
             lineaBuffer[strcspn(lineaBuffer, "\r\n")] = 0;
 
-            // 1. Imprimir la línea de código con el número de línea alineado
             fprintf(stderr, " %5d | %s\n", numLinea, lineaBuffer);
-
-            // 2. Imprimir la barra vertical de margen
             fprintf(stderr, "       | ");
 
-            // 3. Imprimir espacios hasta la columna del error
             for (int i = 1; i < numColumna; i++) {
-                // Preservar tabulaciones si la línea original tenía '\t'
                 if (lineaBuffer[i - 1] == '\t') {
                     fputc('\t', stderr);
                 } else {
@@ -708,7 +696,6 @@ static void imprimirLineaErrorGCC(const char *archivo, int numLinea, int numColu
                 }
             }
 
-            // 4. Imprimir el indicador '^' y el subrayado '~' para la longitud del token
             fputc('^', stderr);
             for (int i = 1; i < longitudToken; i++) {
                 fputc('~', stderr);
@@ -722,21 +709,17 @@ static void imprimirLineaErrorGCC(const char *archivo, int numLinea, int numColu
     fclose(f);
 }
 
-/* Función yyerror adaptada al formato nativo de GCC */
+// Función yyerror adaptada al formato nativo de GCC
 void yyerror(const char *s) {
     totalErrores++;
 
     int columna = yylval.tokenInfo.columna > 0 ? yylval.tokenInfo.columna : columnaAct;
     int lenToken = yyleng > 0 ? yyleng : 1;
 
-    /* Puntero correcto const char * */
     const char *archivo = (archivoFuente && strlen(archivoFuente) > 0)
                           ? archivoFuente
                           : "fuente.c";
 
-    // Encabezado estándar de GCC
     fprintf(stderr, "%s:%d:%d: \033[1;31merror:\033[0m %s\n", archivo, lineaAct, columna, s);
-
-    // Muestra del código fuente y el cursor ^
     imprimirLineaErrorGCC(archivo, lineaAct, columna, lenToken);
 }
