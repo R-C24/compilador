@@ -15,6 +15,7 @@ struct Macro{
 extern Macro macros[MaxMacros];
 extern int totalMacros;
 extern int totalErrores;
+extern const char *archivoFuente;
 
 void agregarMacro(char *nombre, char *valor);
 void traducirMacros(char *linea);

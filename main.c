@@ -15,13 +15,12 @@ extern FILE *yyin;
 extern void yyrestart(FILE *new_file);
 extern struct ASTNodo *raizAST;
 extern int yyparse();
+const char *archivoFuente = NULL;
 
 int main(int argc, char *argv[]) {
     int opt;
     int activarPreproceso = 0; // El preproceso está desactivado por defecto.
     int reemplazarOriginal = 0; // Está desactivado por defecto.
-    char *archivoFuente = NULL;
-
     while ((opt = getopt(argc, argv, "prgb")) != -1) {
         switch (opt) {
             case 'p':
@@ -373,6 +372,7 @@ void printDeclaracionVariable(struct ASTNodo *nodo, FILE *f, int nivel) {
 }
 
 // Maneja el prettyprint para las lista de identificadores
+// Maneja el prettyprint para las lista de identificadores
 void printListaIds(struct ASTNodo *nodo, FILE *f) {
     if (!nodo) return;
 
@@ -388,6 +388,16 @@ void printListaIds(struct ASTNodo *nodo, FILE *f) {
     }
     else if (nodo->valorLexema && strcmp(nodo->valorLexema, "var-init") == 0) {
         prettyPrintAST(nodo->izq, f, 0);
+    }
+    // Soporte para punteros (*p, **pp)
+    else if (nodo->valorLexema && strcmp(nodo->valorLexema, "var-puntero") == 0) {
+        struct ASTNodo *unario = nodo->izq;
+        if (unario && unario->valorLexema && strncmp(unario->valorLexema, "unario:", 7) == 0) {
+            // Imprime el asterisco
+            fprintf(f, "%s", unario->valorLexema + 7);
+            // Llama recursivamente para imprimir el resto (var-simple, var-init u otro var-puntero)
+            printListaIds(unario->izq, f);
+        }
     }
 }
 
@@ -750,7 +760,7 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
             prettyPrintAST(nodo->der, f, 0);
             fprintf(f, "]");
         } else if (nodo->valorLexema && strcmp(nodo->valorLexema, "?") == 0) {
-            // Ternario: cond ? a : b  (der->izq = a, der->der = b)
+            // Ternario: cond ? a : b
             prettyPrintAST(nodo->izq, f, 0);
             fprintf(f, " ? ");
             prettyPrintAST(nodo->der->izq, f, 0);
@@ -763,13 +773,16 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
             prettyPrintAST(nodo->der, f, 0);
         }
     } else if (nodo->izq != NULL) {
-        // Unaria / Return / Incrementos o Decrementos (ej. c++ o ++c)
+        // Bloque Unario limpio (Return, prefijos, postfijos)
         if (nodo->valorLexema && strncmp(nodo->valorLexema, "unario:", 7) == 0) {
-            // Operador unario prefijo: -x, !x, *p, &x, ++x, sizeof x
             fprintf(f, "%s", nodo->valorLexema + 7);
-            // Evita que "- -a" se imprima como "--a"
-            if (nodo->izq->valorLexema && strncmp(nodo->izq->valorLexema, "unario:", 7) == 0) {
-                fprintf(f, " ");
+            
+            // Espaciado dinámico únicamente para conflictos de operadores aritméticos (ej. - -x vs --x)
+            char opActual = nodo->valorLexema[7];
+            if ((opActual == '-' || opActual == '+') && nodo->izq->valorLexema && strncmp(nodo->izq->valorLexema, "unario:", 7) == 0) {
+                if (nodo->izq->valorLexema[7] == opActual) {
+                    fprintf(f, " ");
+                }
             }
             prettyPrintAST(nodo->izq, f, 0);
         }
@@ -783,17 +796,19 @@ void printExpresion(struct ASTNodo *nodo, FILE *f, int nivel) {
             prettyPrintAST(nodo->izq, f, 0);
         }
         else if (nodo->valorLexema && (strcmp(nodo->valorLexema, "++") == 0 || strcmp(nodo->valorLexema, "--") == 0)) {
+            // Postfijo
             prettyPrintAST(nodo->izq, f, 0);
             fprintf(f, "%s", nodo->valorLexema);
         }
         else {
+            // Resto de los casos unarios/asociativos
             if (nodo->valorLexema) {
                 fprintf(f, "%s ", nodo->valorLexema);
             }
             prettyPrintAST(nodo->izq, f, 0);
         }
     } else {
-        //  Identificador o literal numérico
+        // Hoja: Identificador o literal numérico
         if (nodo->valorLexema != NULL) {
             fprintf(f, "%s", nodo->valorLexema);
         } else {

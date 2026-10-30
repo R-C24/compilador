@@ -10,6 +10,9 @@ extern int lineaAct;
 extern int columnaAct;
 extern FILE *yyin;
 
+extern int yyleng;
+extern const char *archivoFuente;
+
 int totalErrores = 0;
 
 void yyerror(const char *s);
@@ -38,7 +41,7 @@ struct ASTNodo *raizAST = NULL;
 %token <tokenInfo> TokenOpBits TokenOpIgualdad TokenOpDesplazamiento
 %token <tokenInfo> TokenOpAditivos TokenOpMultiplicativos TokenOpInc TokenError
 
-%type <nodo> programa funcion retornar bloqueCodigo sentenciaBloque sentenciaSimple condicionIf loopWhile loopDoWhile loopFor inicializacionFor condicional caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos llamadaFuncion especificadores listaIds
+%type <nodo> programa funcion llamadaFuncion retornar bloqueCodigo sentenciaBloque sentenciaSimple condicionIf loopWhile loopDoWhile loopFor inicializacionFor condicional caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos especificadores listaIds
 
 %right '=' TokenOpAsignacion
 %right '?' ':'
@@ -119,7 +122,7 @@ funcion:
 ;
 
 retornar:
-    TokenReturn ';' { 
+    TokenReturn ';' {
         $$ = crearNodo(nodoExpresion, NULL, NULL, "return");
         raizAST = $$;
     }
@@ -331,13 +334,23 @@ listaParametros:
     ;
 
 parametro:
-    especificadores TokenID {
-        // $1 contiene la estructura completa de los especificadores acumulados
-        // $2.lexema contiene el nombre del parámetro
+      especificadores TokenID {
         $$ = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
         raizAST = $$;
     }
-    ;
+    /* Soporte para parámetros como: int *x o char **argv */
+    | especificadores TokenOpMultiplicativos TokenID {
+        if (strcmp($2.lexema, "*") == 0) {
+            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+            struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
+            $$ = crearNodo(nodoExpresion, $1, ptrNodo, "parametro-puntero");
+        } else {
+            yyerror("se esperaba '*' en la declaración del parámetro");
+            $$ = crearNodo(nodoExpresion, $1, NULL, $3.lexema);
+        }
+        raizAST = $$;
+    }
+;
 
 listaDeclaracionVariables:
     { $$ = NULL; raizAST = $$;} /* Por si la función no tiene declaraciones */
@@ -348,7 +361,7 @@ listaDeclaracionVariables:
     ;
 
 declaracionVariable:
-    especificadores listaIds ';' {
+      especificadores listaIds ';' {
         $$ = crearNodo(nodoDeclaracionVariable, $1, $2, "declaracion-multiple");
         raizAST = $$;
     }
@@ -365,28 +378,35 @@ declaracionVariable:
 ;
 
 listaIds:
-    TokenID {
-        // Variable simple sin inicialización (ej. x)
+      TokenID {
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, idNodo, NULL, "var-simple");
         raizAST = $$;
     }
+    /* Soporte para declaración de punteros: int *p; o int **p; */
+    | TokenOpMultiplicativos listaIds {
+        if (strcmp($1.lexema, "*") == 0) {
+            struct ASTNodo *nodoPtr = crearNodoUnario("*", $2);
+            $$ = crearNodo(nodoDeclaracionVariable, nodoPtr, NULL, "var-puntero");
+        } else {
+            yyerror("se esperaba '*' en la declaración de puntero");
+            $$ = $2;
+        }
+        raizAST = $$;
+    }
     | TokenID '=' expresion {
-        // Variable inicializada (ej. x = 5)
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         struct ASTNodo *asig = crearNodo(nodoExpresion, idNodo, $3, "=");
         $$ = crearNodo(nodoDeclaracionVariable, asig, NULL, "var-init");
         raizAST = $$;
     }
     | listaIds ',' TokenID {
-        // Encadenamiento de múltiples variables sin inicializar (ej. int x, y)
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, idNodo, NULL, "var-simple");
         $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
         raizAST = $$;
     }
     | listaIds ',' TokenID '=' expresion {
-        // Encadenamiento mezclando inicialización (ej. int x = 1, y)
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *asig = crearNodo(nodoExpresion, idNodo, $5, "=");
         struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, asig, NULL, "var-init");
@@ -708,7 +728,11 @@ void yyerror(const char *s) {
 
     int columna = yylval.tokenInfo.columna > 0 ? yylval.tokenInfo.columna : columnaAct;
     int lenToken = yyleng > 0 ? yyleng : 1;
-    const char *archivo = nombreArchivoFuente ? nombreArchivoFuente : "fuente.c";
+
+    /* Puntero correcto const char * */
+    const char *archivo = (archivoFuente && strlen(archivoFuente) > 0)
+                          ? archivoFuente
+                          : "fuente.c";
 
     // Encabezado estándar de GCC
     fprintf(stderr, "%s:%d:%d: \033[1;31merror:\033[0m %s\n", archivo, lineaAct, columna, s);
