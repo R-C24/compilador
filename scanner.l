@@ -54,9 +54,10 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 
     /* Modificadores y Tipos de Dato */
 "unsigned"|"signed"|"short"|"long"|"static"|"extern"|"const"|"volatile"|"auto"|"register" { return (crearToken(TokenModificador, 0)); }
-"int"|"char"|"float"|"double"|"void" { return (crearToken(TokenTipoDato, 0)); }
+"int"|"char"|"float"|"double" { return (crearToken(TokenTipoDato, 0)); }
 
     /* Palabras Reservadas */
+"void"      { return (crearToken(TokenVoid, 0)); }
 "break"     { return (crearToken(TokenBreak, 0)); }
 "continue"  { return (crearToken(TokenContinue, 0)); }
 "enum"      { return (crearToken(TokenEnum, 0)); }
@@ -103,6 +104,9 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 
     /* Operadores */
 "?"  {return '?'; }
+
+    /* Operadores de acceso */
+"->"    { return (crearToken(TokenFlecha, 0)); }
 
     /* Operadores de asignación */
 "+="|"-="|"*="|"/="|"%="|"&="|"^="|"|="|"<<="|">>=" {return (crearToken(TokenOpAsignacion, 0));}
