@@ -1,0 +1,46 @@
+{
+	"cmake" : 
+	{
+		"generator" : 
+		{
+			"multiConfig" : false,
+			"name" : "Unix Makefiles"
+		},
+		"paths" : 
+		{
+			"cmake" : "/snap/clion/531/bin/cmake/linux/x64/bin/cmake",
+			"cpack" : "/snap/clion/531/bin/cmake/linux/x64/bin/cpack",
+			"ctest" : "/snap/clion/531/bin/cmake/linux/x64/bin/ctest",
+			"root" : "/snap/clion/531/bin/cmake/linux/x64/share/cmake-4.4"
+		},
+		"version" : 
+		{
+			"isDirty" : false,
+			"major" : 4,
+			"minor" : 4,
+			"patch" : 2,
+			"string" : "4.4.2",
+			"suffix" : ""
+		}
+	},
+	"objects" : [],
+	"reply" : 
+	{
+		"cache-v2" : 
+		{
+			"error" : "no buildsystem generated"
+		},
+		"cmakeFiles-v1" : 
+		{
+			"error" : "no buildsystem generated"
+		},
+		"codemodel-v2" : 
+		{
+			"error" : "no buildsystem generated"
+		},
+		"toolchains-v1" : 
+		{
+			"error" : "no buildsystem generated"
+		}
+	}
+}

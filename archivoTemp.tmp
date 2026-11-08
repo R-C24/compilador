@@ -1,0 +1,217 @@
+/* ============================================================
+ * PRUEBA 2 (VALIDA) - Lista enlazada de simbolos de una tabla
+ * Ejercita typedef, punteros a funcion, recursion, cadenas,
+ * do-while, operador ternario y arreglos de estructuras.
+ * ============================================================ */
+
+
+
+
+
+typedef enum { SIMBOLO_VAR, SIMBOLO_FUNC, SIMBOLO_CONST } clase_simbolo;
+
+typedef struct simbolo {
+    char               nombre[32];
+    clase_simbolo      clase;
+    int                linea;
+    int                usos;
+    struct simbolo    *sig;
+} simbolo;
+
+typedef struct {
+    simbolo *cabeza;
+    int      total;
+} tabla;
+
+typedef void (*visitante)(const simbolo *s, void *contexto);
+
+simbolo *simbolo_nuevo(const char *nombre, clase_simbolo clase, int linea)
+{
+    simbolo *nuevo = (simbolo *) malloc(sizeof (simbolo));
+
+    if (nuevo == NULL) {
+        return NULL;
+    }
+
+    strncpy(nuevo->nombre, nombre, sizeof(nuevo->nombre) - 1);
+    nuevo->nombre[sizeof(nuevo->nombre) - 1] = '\0';
+    nuevo->clase = clase;
+    nuevo->linea = linea;
+    nuevo->usos = 0;
+    nuevo->sig = NULL;
+    return nuevo;
+}
+
+int tabla_insertar(tabla *t, simbolo *s)
+{
+    simbolo *actual;
+
+    if (t == NULL || s == NULL) {
+        return -1;
+    }
+
+    if (t->cabeza == NULL) {
+        t->cabeza = s;
+        t->total++;
+        return 0;
+    }
+
+    actual = t->cabeza;
+    while (actual->sig != NULL) {
+        if (strcmp(actual->nombre, s->nombre) == 0) {
+            actual->usos++;
+            return 1;
+        }
+        actual = actual->sig;
+    }
+
+    if (strcmp(actual->nombre, s->nombre) == 0) {
+        actual->usos++;
+        return 1;
+    }
+
+    actual->sig = s;
+    t->total++;
+    return 0;
+}
+
+simbolo *tabla_buscar(tabla *t, const char *nombre)
+{
+    simbolo *actual = t->cabeza;
+
+    while (actual != NULL) {
+        if (strcmp(actual->nombre, nombre) == 0) {
+            return actual;
+        }
+        actual = actual->sig;
+    }
+
+    return NULL;
+}
+
+void tabla_recorrer(tabla *t, visitante f, void *ctx)
+{
+    simbolo *actual = t->cabeza;
+
+    while (actual != NULL) {
+        f(actual, ctx);
+        actual = actual->sig;
+    }
+}
+
+void tabla_liberar(tabla *t)
+{
+    simbolo *actual = t->cabeza;
+    simbolo *siguiente;
+
+    while (actual != NULL) {
+        siguiente = actual->sig;
+        free(actual);
+        actual = siguiente;
+    }
+
+    t->cabeza = NULL;
+    t->total = 0;
+}
+
+static const char *nombre_clase(clase_simbolo c)
+{
+    return (c == SIMBOLO_VAR) ? "variable"
+         : (c == SIMBOLO_FUNC) ? "funcion"
+         : "constante";
+}
+
+static void imprimir_simbolo(const simbolo *s, void *ctx)
+{
+    int *contador = (int *) ctx;
+
+    printf("%-4d %-16s %-10s linea %3d usos %2d\n",
+           ++(*contador), s->nombre, nombre_clase(s->clase), s->linea, s->usos);
+}
+
+static int contar_por_clase(tabla *t, clase_simbolo clase)
+{
+    simbolo *actual;
+    int cuenta = 0;
+
+    actual = t->cabeza;
+    do {
+        if (actual->clase == clase) {
+            cuenta++;
+        }
+        actual = actual->sig;
+    } while (actual != NULL);
+
+    return cuenta;
+}
+
+static int es_identificador(const char *texto)
+{
+    int i;
+
+    if (texto == NULL || !isalpha((unsigned char) texto[0])) {
+        return 0;
+    }
+    if (texto[0] == '_') {
+        return 0;
+    }
+
+    for (i = 1; texto[i] != '\0'; i++) {
+        if (!isalnum((unsigned char) texto[i]) && texto[i] != '_') {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+int main(void)
+{
+    tabla t = { NULL, 0 };
+    const char *tokens[] = {
+        "contador", "suma", "contador", "promedio",
+        "calcular", "contador", "MAXIMO", "suma", "temporal"
+    };
+    int n_tokens = (int) (sizeof(tokens) / sizeof(tokens[0]));
+    int i;
+    int numerados = 0;
+    simbolo *s;
+
+    for (i = 0; i < n_tokens; i++) {
+        if (!es_identificador(tokens[i])) {
+            fprintf(stderr, "token invalido en posicion %d: %s\n", i, tokens[i]);
+            continue;
+        }
+
+        s = tabla_buscar(&t, tokens[i]);
+        if (s != NULL) {
+            s->usos++;
+        } else {
+            clase_simbolo clase = isupper((unsigned char) tokens[i][0])
+                                  ? SIMBOLO_CONST
+                                  : (i % 4 == 0 ? SIMBOLO_FUNC : SIMBOLO_VAR);
+            simbolo *nuevo = simbolo_nuevo(tokens[i], clase, 10 + i);
+            if (nuevo == NULL) {
+                tabla_liberar(&t);
+                return EXIT_FAILURE;
+            }
+            tabla_insertar(&t, nuevo);
+        }
+    }
+
+    printf("Tabla de simbolos (%d entradas)\n", t.total);
+    tabla_recorrer(&t, imprimir_simbolo, &numerados);
+
+    printf("\nVariables   : %d\n", contar_por_clase(&t, SIMBOLO_VAR));
+    printf("Funciones   : %d\n", contar_por_clase(&t, SIMBOLO_FUNC));
+    printf("Constantes  : %d\n", contar_por_clase(&t, SIMBOLO_CONST));
+
+    s = tabla_buscar(&t, "contador");
+    if (s != NULL) {
+        printf("\n'contador' aparece %d veces\n", s->usos + 1);
+    }
+
+    tabla_liberar(&t);
+    return numerados > 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
