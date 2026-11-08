@@ -130,8 +130,8 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
     /* Operadores de aditivos */
 "+"|"-" {return (crearToken(TokenOpAditivos, 0));}
 
-    /* Operadores de multiplicativos */
-"%"|"*"|"/" {return (crearToken(TokenOpMultiplicativos, 0));}
+"%"|"/"  { return (crearToken(TokenOpMultiplicativos, 0)); }
+"*"      { return (crearToken('*', 0)); }
 
     /* Operadores de incremento */
 "++"|"--" {return (crearToken(TokenOpInc, 0));}

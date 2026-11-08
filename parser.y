@@ -59,7 +59,8 @@ struct ASTNodo *raizAST = NULL;
 %left TokenOpLogico
 %left TokenOpBits
 %left TokenOpIgualdad TokenOpDesplazamiento
-%left TokenOpAditivos TokenOpMultiplicativos
+%left TokenOpAditivos
+%left TokenOpMultiplicativos '*'
 %right UNARIO
 %left TokenOpInc '[' ']' TokenFlecha '.'
 
@@ -110,7 +111,7 @@ funcion:
         $$ = crearNodo(nodoFuncion, cabecera, NULL, $2.lexema);
         raizAST = $$;
     }
-    | especificadores TokenOpMultiplicativos TokenID '(' listaParametros ')' ';' {
+    | especificadores '*' TokenID '(' listaParametros ')' ';' {
         struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $5, $3.lexema);
         $$ = crearNodo(nodoFuncion, cabecera, NULL, $3.lexema);
         raizAST = $$;
@@ -120,7 +121,7 @@ funcion:
         $$ = crearNodo(nodoFuncion, cabecera, $7, $2.lexema);
         raizAST = $$;
     }
-    | especificadores TokenOpMultiplicativos TokenID '(' listaParametros ')' '{' bloqueCodigo '}' {
+    | especificadores '*' TokenID '(' listaParametros ')' '{' bloqueCodigo '}' {
         struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $5, $3.lexema);
         $$ = crearNodo(nodoFuncion, cabecera, $8, $3.lexema);
         raizAST = $$;
@@ -391,25 +392,17 @@ parametro:
         $$ = crearNodo(nodoExpresion, $1, NULL, "parametro-tipo");
         raizAST = $$;
     }
-    | especificadores TokenOpMultiplicativos TokenID {
-        if (strcmp($2.lexema, "*") == 0) {
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
-            $$ = crearNodo(nodoExpresion, $1, ptrNodo, "parametro-puntero");
-        } else {
-            yyerror("se esperaba '*' en la declaración del parámetro");
-            $$ = crearNodo(nodoExpresion, $1, NULL, $3.lexema);
-        }
+    | especificadores '*' TokenID {
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
+        $$ = crearNodo(nodoExpresion, $1, ptrNodo, "parametro-puntero");
+     
         raizAST = $$;
     }
-    | especificadores TokenOpMultiplicativos {
-        if (strcmp($2.lexema, "*") == 0) {
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", NULL);
-            $$ = crearNodo(nodoExpresion, $1, ptrNodo, "parametro-puntero-anon");
-        } else {
-            yyerror("se esperaba '*' en la declaración del parámetro");
-            $$ = crearNodo(nodoExpresion, $1, NULL, "parametro-error");
-        }
+    | especificadores '*' {
+       struct ASTNodo *ptrNodo = crearNodoUnario("*", NULL);
+        $$ = crearNodo(nodoExpresion, $1, ptrNodo, "parametro-puntero-anon");
+    
         raizAST = $$;
     }
     | especificadores TokenID listaDimensiones {
@@ -418,16 +411,12 @@ parametro:
         $$ = crearNodo(nodoExpresion, $1, arrNodo, "parametro");
         raizAST = $$;
     }
-    | especificadores TokenOpMultiplicativos TokenID listaDimensiones {
-        if (strcmp($2.lexema, "*") == 0) {
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
-            struct ASTNodo *arrNodo = crearNodo(nodoExpresion, ptrNodo, $4, "parametro-array");
-            $$ = crearNodo(nodoExpresion, $1, arrNodo, "parametro-puntero");
-        } else {
-            yyerror("se esperaba '*' en la declaración del parámetro");
-            $$ = crearNodo(nodoExpresion, $1, NULL, $3.lexema);
-        }
+    | especificadores '*' TokenID listaDimensiones {
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
+        struct ASTNodo *arrNodo = crearNodo(nodoExpresion, ptrNodo, $4, "parametro-array");
+        $$ = crearNodo(nodoExpresion, $1, arrNodo, "parametro-puntero");
+    
         raizAST = $$;
     }
 ;
@@ -482,28 +471,19 @@ listaIds:
         $$ = crearNodo(nodoDeclaracionVariable, idNodo, NULL, "var-simple");
         raizAST = $$;
     }
-    | TokenOpMultiplicativos listaIds {
-        if (strcmp($1.lexema, "*") == 0) {
-            struct ASTNodo *nodoPtr = crearNodoUnario("*", $2);
-            $$ = crearNodo(nodoDeclaracionVariable, nodoPtr, NULL, "var-puntero");
-        } else {
-            yyerror("se esperaba '*' en la declaración de puntero");
-            $$ = $2;
-        }
+    | '*' listaIds {
+        struct ASTNodo *nodoPtr = crearNodoUnario("*", $2);
+        $$ = crearNodo(nodoDeclaracionVariable, nodoPtr, NULL, "var-puntero");
+    
         raizAST = $$;
     }
-    | '(' TokenOpMultiplicativos TokenID ')' '(' listaParametros ')' {
-        if (strcmp($2.lexema, "*") == 0) {
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
-            $$ = crearNodo(nodoDeclaracionVariable, ptrNodo, $6, "puntero-funcion");
-        } else {
-            yyerror("se esperaba '*' en la declaración del puntero a función");
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-            $$ = crearNodo(nodoDeclaracionVariable, idNodo, $6, "puntero-funcion");
-        }
-        raizAST = $$;
-    }
+    | '(' '*' TokenID ')' '(' listaParametros ')' {
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
+        $$ = crearNodo(nodoDeclaracionVariable, ptrNodo, $6, "puntero-funcion");
+    
+         raizAST = $$;
+     }
     | TokenID '=' expresion {
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         struct ASTNodo *asig = crearNodo(nodoExpresion, idNodo, $3, "=");
@@ -516,30 +496,20 @@ listaIds:
         $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
         raizAST = $$;
     }
-    | listaIds ',' TokenOpMultiplicativos TokenID {
-        if (strcmp($3.lexema, "*") == 0) {
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $4.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
-            struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, ptrNodo, NULL, "var-puntero");
-            $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
-        } else {
-            yyerror("se esperaba '*' en la declaración de puntero");
-            $$ = $1;
-        }
+    | listaIds ',' '*' TokenID {
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $4.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
+        struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, ptrNodo, NULL, "var-puntero");
+        $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
+    
         raizAST = $$;
     }
-    | listaIds ',' '(' TokenOpMultiplicativos TokenID ')' '(' listaParametros ')' {
-        if (strcmp($4.lexema, "*") == 0) {
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $5.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
-            struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, ptrNodo, $8, "puntero-funcion");
-            $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
-        } else {
-            yyerror("se esperaba '*' en la declaración del puntero a función");
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $5.lexema);
-            struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, idNodo, $8, "puntero-funcion");
-            $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
-        }
+    | listaIds ',' '(' '*' TokenID ')' '(' listaParametros ')' {
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $5.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
+        struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, ptrNodo, $8, "puntero-funcion");
+        $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
+    
         raizAST = $$;
     }
     | listaIds ',' TokenID '=' expresion {
@@ -587,26 +557,18 @@ declaracionArrays:
         $$ = crearNodo(nodoDeclaracionVariable, cabecera, $6, "matriz-init");
         raizAST = $$;
     }
-    | especificadores TokenOpMultiplicativos TokenID '[' ']' '=' '{' listaElementos '}' ';' {
-        if (strcmp($2.lexema, "*") == 0) {
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
-            $$ = crearNodo(nodoDeclaracionVariable, ptrNodo, $8, "arr-puntero-init");
-        } else {
-            yyerror("se esperaba '*' en la declaración del arreglo de punteros");
-            $$ = NULL;
-        }
+    | especificadores '*' TokenID '[' ']' '=' '{' listaElementos '}' ';' {
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
+        $$ = crearNodo(nodoDeclaracionVariable, ptrNodo, $8, "arr-puntero-init");
+    
         raizAST = $$;
     }
-    | especificadores TokenOpMultiplicativos TokenID '[' TokenInt ']' '=' '{' listaElementos '}' ';' {
-        if (strcmp($2.lexema, "*") == 0) {
-            struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
-            $$ = crearNodo(nodoDeclaracionVariable, ptrNodo, $9, "arr-puntero-init");
-        } else {
-            yyerror("se esperaba '*' en la declaración del arreglo de punteros");
-            $$ = NULL;
-        }
+    | especificadores '*' TokenID '[' TokenInt ']' '=' '{' listaElementos '}' ';' {
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
+        $$ = crearNodo(nodoDeclaracionVariable, ptrNodo, $9, "arr-puntero-init");
+    
         raizAST = $$;
     }
 ;
@@ -631,15 +593,9 @@ listaDimensiones:
 ;
 
 especificadores:
-      tipoCast { $$ = $1; }
+    tipoCast { $$ = $1; }
     | TokenID {
         $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        raizAST = $$;
-    }
-    | TokenModificador TokenID {
-        struct ASTNodo *mod = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        struct ASTNodo *tipoNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
-        $$ = crearNodo(nodoExpresion, mod, tipoNodo, "mod-tipo");
         raizAST = $$;
     }
 ;
@@ -674,7 +630,7 @@ tipoCast:
         $$ = crearNodo(nodoExpresion, NULL, $3, "def-union-anon");
         raizAST = $$;
     }
-    |TokenTipoDato {
+    | TokenTipoDato {
         $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         raizAST = $$;
     }
@@ -682,6 +638,7 @@ tipoCast:
         $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         raizAST = $$;
     }
+
     | TokenModificador TokenNombreTipo {
         struct ASTNodo *mod = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         struct ASTNodo *tipoNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
@@ -894,14 +851,10 @@ expresion:
         $$ = crearNodo(nodoExpresion, $2, $4, "casteo");
         raizAST = $$;
     }
-    | '(' tipoCast TokenOpMultiplicativos ')' expresion %prec UNARIO {
-        if (strcmp($3.lexema, "*") == 0) {
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", $2);
-            $$ = crearNodo(nodoExpresion, ptrNodo, $5, "casteo-puntero");
-        } else {
-            yyerror("se esperaba '*' en el casteo a puntero");
-            $$ = crearNodo(nodoExpresion, $2, $5, "casteo");
-        }
+    | '(' tipoCast '*' ')' expresion %prec UNARIO {
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", $2);
+        $$ = crearNodo(nodoExpresion, ptrNodo, $5, "casteo-puntero");
+    
         raizAST = $$;
     }
     | expresion '=' expresion {
@@ -936,6 +889,10 @@ expresion:
         $$ = crearNodo(nodoExpresion, $1, $3, $2.lexema);
         raizAST = $$;
     }
+    | expresion '*' expresion {
+        $$ = crearNodo(nodoExpresion, $1, $3, "*");
+        raizAST = $$;
+    }
     /* Operadores unarios prefijo */
     | TokenOpAditivos expresion %prec UNARIO {
         $$ = crearNodoUnario($1.lexema, $2);
@@ -954,15 +911,10 @@ expresion:
         $$ = crearNodoUnario($1.lexema, $2);
         raizAST = $$;
     }
-    | TokenOpMultiplicativos expresion %prec UNARIO {
-        if (strcmp($1.lexema, "*") != 0) {
-            char msg[96];
-            snprintf(msg, sizeof(msg), "se esperaba una expresión antes de '%s'", $1.lexema);
-            yyerror(msg);
-        }
-        $$ = crearNodoUnario($1.lexema, $2);
-        raizAST = $$;
-    }
+    | '*' expresion %prec UNARIO {
+        $$ = crearNodoUnario("*", $2);
+         raizAST = $$;
+     }
     | TokenOpInc expresion %prec UNARIO {
         $$ = crearNodoUnario($1.lexema, $2);
         raizAST = $$;
@@ -975,14 +927,10 @@ expresion:
         $$ = crearNodo(nodoExpresion, $3, NULL, "sizeof-tipo");
         raizAST = $$;
     }
-    | TokenSizeof '(' tipoCast TokenOpMultiplicativos ')' %prec UNARIO {
-        if (strcmp($4.lexema, "*") == 0) {
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", $3);
-            $$ = crearNodo(nodoExpresion, ptrNodo, NULL, "sizeof-puntero");
-        } else {
-            yyerror("se esperaba '*' en el sizeof del puntero");
-            $$ = crearNodo(nodoExpresion, $3, NULL, "sizeof-tipo");
-        }
+    | TokenSizeof '(' tipoCast '*' ')' %prec UNARIO {
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", $3);
+        $$ = crearNodo(nodoExpresion, ptrNodo, NULL, "sizeof-puntero");
+    
         raizAST = $$;
     }
     /* Postfijos */
@@ -1002,26 +950,18 @@ expresion:
         $$ = crearNodo(nodoExpresion, tipo, $5, "casteo");
         raizAST = $$;
     }
-    | '(' TokenVoid TokenOpMultiplicativos ')' expresion %prec UNARIO {
-        if (strcmp($3.lexema, "*") == 0) {
-            struct ASTNodo *tipoNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", tipoNodo);
-            $$ = crearNodo(nodoExpresion, ptrNodo, $5, "casteo-puntero");
-        } else {
-            yyerror("se esperaba '*' en el casteo de puntero");
-            $$ = $5;
-        }
+    | '(' TokenVoid '*' ')' expresion %prec UNARIO {
+        struct ASTNodo *tipoNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", tipoNodo);
+        $$ = crearNodo(nodoExpresion, ptrNodo, $5, "casteo-puntero");
+    
         raizAST = $$;
     }
-    | '(' TokenStruct TokenID TokenOpMultiplicativos ')' expresion %prec UNARIO {
-        if (strcmp($4.lexema, "*") == 0) {
-            struct ASTNodo *strNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
-            struct ASTNodo *ptrNodo = crearNodoUnario("*", strNodo);
-            $$ = crearNodo(nodoExpresion, ptrNodo, $6, "casteo-puntero-struct");
-        } else {
-            yyerror("se esperaba '*' en el casteo de struct");
-            $$ = $6;
-        }
+    | '(' TokenStruct TokenID '*' ')' expresion %prec UNARIO {
+        struct ASTNodo *strNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        struct ASTNodo *ptrNodo = crearNodoUnario("*", strNodo);
+        $$ = crearNodo(nodoExpresion, ptrNodo, $6, "casteo-puntero-struct");
+    
         raizAST = $$;
     }
 

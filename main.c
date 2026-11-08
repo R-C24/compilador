@@ -9,6 +9,9 @@
 Macro macros[MaxMacros];
 int totalMacros = 0;
 
+TablaSimbolos pilaTablas[MaxAmbitos];
+int topePila = -1;
+
 extern FILE *yyin;
 extern void yyrestart(FILE *new_file);
 extern struct ASTNodo *raizAST;
@@ -83,26 +86,7 @@ int main(int argc, char *argv[]) {
     printf("Iniciando análisis sintáctico con Bison...\n");
 
     if (yyparse() == 0 && totalErrores == 0 && raizAST != NULL) {
-
         char archivoSalida[512];
-        if (reemplazarOriginal) {
-            strcpy(archivoSalida, archivoFuente);
-        } else {
-            snprintf(archivoSalida, sizeof(archivoSalida), "%s.pretty", archivoFuente);
-        }
-
-        FILE *fOut = fopen(archivoSalida, "w");
-        if (!fOut) {
-            perror("Error al crear el archivo de salida formateado");
-            fclose(yyin);
-            return 1;
-        }
-
-        fclose(fOut);
-        printf(" Prettyprint generado exitosamente en: %s\n", archivoSalida);
-
-    } else {
-        fprintf(stderr, "Error sintáctico: No se pudo generar la reimpresión.\n");
     }
 
     if (totalErrores > 0) {
@@ -273,4 +257,100 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
         fputs(linea, f_out);
     }
     fclose(f_in);
+}
+
+
+// Manejo de pila
+
+// Inicializa la pila global al arrancar el compilador
+void inicializarPila() {
+    topePila = -1;
+    pushAmbito();
+}
+
+// Agrega a la pila una nueva tabla de símbolos al entrar a un nuevo contexto
+void pushAmbito() {
+    if (topePila >= MaxAmbitos - 1) {
+        fprintf(stderr, "Error: Desbordamiento de pila de ámbitos.\n");
+        return;
+    }
+    topePila++;
+    pilaTablas[topePila].raiz = NULL;
+}
+
+// Saca de la pila la tabla de símbolos al salir de un contexto
+void popAmbito() {
+    if (topePila < 0) return;
+    
+    imprimirTablaActual(); // Desplegar antes de destruir
+    
+    // Liberar memoria de los registros del ámbito que se cierra
+    RegistroSemantico *actual = pilaTablas[topePila].raiz;
+    while (actual != NULL) {
+        RegistroSemantico *temp = actual;
+        actual = actual->siguiente;
+        free(temp->lexema);
+        free(temp->tipoDato);
+        free(temp);
+    }
+    pilaTablas[topePila].raiz = NULL;
+    topePila--;
+}
+
+// Inserta un nuevo registro semántico en el ámbito actual
+int insertarSimbolo(char *lexema, char *tipoDato, CategoriaSimbolo categoria) {
+    if (topePila < 0) {
+        return 0;
+    }
+    // Verificar si ya existe en el ámbito local actual para evitar duplicados
+    RegistroSemantico *actual = pilaTablas[topePila].raiz;
+    while (actual != NULL) {
+        if (strcmp(actual->lexema, lexema) == 0) {
+            return 0; // Error: Ya declarado en este contexto
+        }
+        actual = actual->siguiente;
+    }
+
+    // Crear el nuevo registro
+    RegistroSemantico *nuevo = (RegistroSemantico*)malloc(sizeof(RegistroSemantico));
+    nuevo->lexema = strdup(lexema);
+    nuevo->tipoDato = strdup(tipoDato);
+    nuevo->categoria = categoria;
+    nuevo->nivelAmbito = topePila;
+    
+    // Insertar al inicio de la lista enlazada del ámbito actual
+    nuevo->siguiente = pilaTablas[topePila].raiz;
+    pilaTablas[topePila].raiz = nuevo;
+
+    return 1;
+}
+
+// Busca un símbolo en toda la pila activa
+RegistroSemantico* buscarSimbolo(char *lexema) {
+    // Recorrer la pila desde arriba hacia abajo
+    for (int i = topePila; i >= 0; i--) {
+        RegistroSemantico *actual = pilaTablas[i].raiz;
+        while (actual != NULL) {
+            if (strcmp(actual->lexema, lexema) == 0) {
+                return actual;
+            }
+            actual = actual->siguiente;
+        }
+    }
+    return NULL;
+}
+
+// Imprime la tabla actual por consola al cerrar un contexto
+void imprimirTablaActual() {
+    if (topePila < 0) {
+        return;
+    }
+    printf("--- Tabla de Simbolos (Ambito Nivel %d) ---\n", topePila);
+    RegistroSemantico *actual = pilaTablas[topePila].raiz;
+    while (actual != NULL) {
+        printf("Nombre: %s | Tipo: %s | Categoria: %d | Nivel: %d\n", 
+               actual->lexema, actual->tipoDato, actual->categoria, actual->nivelAmbito);
+        actual = actual->siguiente;
+    }
+    printf("-------------------------------------------\n");
 }
