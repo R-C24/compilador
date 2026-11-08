@@ -7,6 +7,8 @@
 
 int lineaAct = 1;
 int columnaAct = 1;
+int ultimoToken = 0;
+extern int esTipoUsuario(char *s);
 
 #define YY_USER_ACTION { \
     columnaAct += yyleng; \
@@ -147,7 +149,11 @@ BLOQUECOMENTARIO "/*"([^*]|\*+[^*/])*\*+"/"
 \"([^\"\n\\]|\\.)* { return (crearToken(TokenError, 0)); }
 
     /* Identificadores */
-{ID} { return (crearToken(TokenID, 0)); }
+{ID} {
+    int esTipo = ultimoToken != TokenStruct && ultimoToken != TokenEnum &&
+                 ultimoToken != TokenUnion && esTipoUsuario(yytext);
+    return (crearToken(esTipo ? TokenNombreTipo : TokenID, 0));
+}
 
     /* Separadores */
 
@@ -182,7 +188,7 @@ int crearToken(int codToken, double valor) {
         fprintf(stderr, "Error léxico en línea %d, columna %d: token o identificador no válido '%s'\n",
                 lineaAct, columnaAct - yyleng, yytext);
     }
-
+    ultimoToken = codToken;
     return codToken;
 }
 

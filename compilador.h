@@ -5,6 +5,7 @@
 #define MaxNombre 64
 #define MaxValor 256
 #define TamBuffer 1024
+#define MaxTipos 256
 
 typedef struct Macro Macro;
 struct Macro{
@@ -64,6 +65,9 @@ struct ASTNodo {
     double valorNumerico;
 };
 
+int esTipoUsuario(char *s);
+void registrarTipoDeclarado(struct ASTNodo *n);
+
 struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *der, char *lexema);
 void imprimirAST(struct ASTNodo *nodo, int nivel);
 
@@ -72,6 +76,5 @@ typedef enum {
     estiloGNU,
     estiloBSD
 } EstiloPrettyPrint;
-
 
 #endif //COMPILADOR_H
