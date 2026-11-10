@@ -19,6 +19,11 @@ extern int totalMacros;
 extern int totalErrores;
 extern const char *archivoFuente;
 
+extern char *tiposUsuario[MaxTipos];
+extern int totalTiposUsuario;
+extern char *tiposEstandar[];
+extern int totalErrores;
+
 void agregarMacro(char *nombre, char *valor);
 void traducirMacros(char *linea);
 int esCaracterIdentificador(char c);
@@ -69,6 +74,9 @@ struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *de
 
 // -------------Registro, Tabla y Pila-------------
 
+extern char funcionActual[256];
+extern int contextoImpreso;
+
 typedef enum {
     tipoVariable,
     tipoFuncion,
@@ -82,6 +90,8 @@ struct RegistroSemantico {
     char *tipoDato;
     CategoriaSimbolo categoria;
     int nivelAmbito; 
+    int lineaDeclaracion;
+    int columnaDeclaracion;
     struct RegistroSemantico *siguiente;
 };
 
@@ -91,12 +101,25 @@ typedef struct {
 
 extern TablaSimbolos pilaTablas[MaxAmbitos];
 extern int topePila;
+extern char tipoActual[256];
 
 void inicializarPila();
 void pushAmbito();
 void popAmbito();
-int insertarSimbolo(char *lexema, char *tipo_dato, CategoriaSimbolo categoria);
+RegistroSemantico* insertarSimbolo(char *lexema, char *tipo_dato, CategoriaSimbolo categoria, int linea, int columna);
 RegistroSemantico* buscarSimbolo(char *lexema);
 void imprimirTablaActual();
+void validarYRegistrarSimbolo(const char *lexema, const char *tipoDetectado, CategoriaSimbolo cat, int lineaAct, int columnaAct);
+
+void registrarTipoDeclarado(struct ASTNodo *n);
+void registrarTipo(char *s);
+int esTipoUsuario(char *s);
+void yyerror(const char *s);
+void imprimirLineaErrorGCC(const char *archivo, int numLinea, int numColumna, int longitudToken);
+struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *der, char *lexema);
+struct ASTNodo *crearNodoUnario(const char *op, struct ASTNodo *operando);
+
+void reportarUsoNoDeclarado(const char *archivo, const char *lexema, int lineaErr, int colErr, int lenErr);
+void validarUsoSimbolo(const char *lexema, int lineaAct, int columnaAct);
 
 #endif //COMPILADOR_H

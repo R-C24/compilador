@@ -9,6 +9,7 @@ int lineaAct = 1;
 int columnaAct = 1;
 int ultimoToken = 0;
 extern int esTipoUsuario(char *s);
+int crearToken(int codToken, double valor);
 
 #define YY_USER_ACTION { \
     columnaAct += yyleng; \

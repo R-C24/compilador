@@ -24,8 +24,8 @@ int main(void)
 {
     double notas[MAX_ESTUDIANTES][CANTIDAD_NOTAS];
     double definitiva[MAX_ESTUDIANTES];
-    int aprobados = 0;
     int reprobados = 0;
+    int reprobados;
     int i;
     int j;
 
