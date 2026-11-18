@@ -41,7 +41,7 @@ struct ASTNodo *raizAST = NULL;
 %token <tokenInfo> TokenOpBits TokenOpIgualdad TokenOpDesplazamiento
 %token <tokenInfo> TokenOpAditivos TokenOpMultiplicativos TokenOpInc TokenError
 
-%type <nodo> tipoCast programa funcion retornar bloqueCodigo sentenciaBloque sentenciaSimple condicionIf loopWhile loopDoWhile loopFor inicializacionFor condicional elementoCase caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaDimensiones listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos especificadores listaIds elementoInit abrirAmbito cerrarAmbito cuerpoEstructura sentenciaSola
+%type <nodo> tipoCast programa funcion retornar bloqueCodigo sentenciaBloque condicionIf loopWhile loopDoWhile loopFor inicializacionFor condicional elementoCase caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaDimensiones listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos especificadores listaIds elementoInit abrirAmbito cerrarAmbito cuerpoEstructura sentenciaSola
 
 %right '=' TokenOpAsignacion
 %right '?' ':'
@@ -96,30 +96,60 @@ programa:
 
 funcion:
     especificadores TokenID '(' listaParametros ')' ';' {
+        char tipoRet[256] = "int";
+        obtenerTextoTipo($1, tipoRet, sizeof(tipoRet));
+        validarYRegistrarFuncion($2.lexema, tipoRet, 0, $2.linea, $2.columna);
         struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $4, $2.lexema);
         $$ = crearNodo(nodoFuncion, cabecera, NULL, $2.lexema);
         raizAST = $$;
     }
     | especificadores '*' TokenID '(' listaParametros ')' ';' {
+        char tipoRet[256] = "int";
+        obtenerTextoTipo($1, tipoRet, sizeof(tipoRet));
+        strncat(tipoRet, " *", sizeof(tipoRet) - strlen(tipoRet) - 1);
+        validarYRegistrarFuncion($3.lexema, tipoRet, 0, $3.linea, $3.columna);
         struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $5, $3.lexema);
         $$ = crearNodo(nodoFuncion, cabecera, NULL, $3.lexema);
         raizAST = $$;
     }
     | especificadores TokenID '(' listaParametros ')' '{' {
-        strncpy(funcionActual, $2.lexema, 255);
+        strncpy(funcionActual, $2.lexema, sizeof(funcionActual) - 1);
+        funcionActual[sizeof(funcionActual) - 1] = '\0';
         contextoImpreso = 0;
-    } abrirAmbito bloqueCodigo cerrarAmbito '}' {
+        char *strParams = obtenerTextoParametros($4);
+
+        char tipoRet[256] = "int";
+        obtenerTextoTipo($1, tipoRet, sizeof(tipoRet));
+        validarYRegistrarFuncion($2.lexema, tipoRet, 1, $2.linea, $2.columna);
+
+        pushAmbitoConContexto(funcionActual, strParams);
+        free(strParams);
+        registrarParametrosEnTabla($4);
+
+    } bloqueCodigo cerrarAmbito '}' {
         struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $4, $2.lexema);
-        $$ = crearNodo(nodoFuncion, cabecera, $9, $2.lexema);
+        $$ = crearNodo(nodoFuncion, cabecera, $8, $2.lexema);
         raizAST = $$;
         funcionActual[0] = '\0';
     }
     | especificadores '*' TokenID '(' listaParametros ')' '{' {
-        strncpy(funcionActual, $3.lexema, 255);
+        strncpy(funcionActual, $3.lexema, sizeof(funcionActual) - 1);
+        funcionActual[sizeof(funcionActual) - 1] = '\0';
         contextoImpreso = 0;
-    } abrirAmbito bloqueCodigo cerrarAmbito '}' {
+        char *strParams = obtenerTextoParametros($5);
+
+        char tipoRet[256] = "int";
+        obtenerTextoTipo($1, tipoRet, sizeof(tipoRet));
+        strncat(tipoRet, " *", sizeof(tipoRet) - strlen(tipoRet) - 1);
+        validarYRegistrarFuncion($3.lexema, tipoRet, 1, $3.linea, $3.columna);
+
+        pushAmbitoConContexto(funcionActual, strParams);
+        free(strParams);
+        registrarParametrosEnTabla($5);
+
+    } bloqueCodigo cerrarAmbito '}' {
         struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $5, $3.lexema);
-        $$ = crearNodo(nodoFuncion, cabecera, $10, $3.lexema);
+        $$ = crearNodo(nodoFuncion, cabecera, $9, $3.lexema);
         raizAST = $$;
         funcionActual[0] = '\0';
     }
@@ -259,10 +289,10 @@ loopDoWhile:
 ;
 
 loopFor:
-    TokenFor '(' inicializacionFor condicional ';' condicional ')' cuerpoEstructura {
-        struct ASTNodo *condInc = crearNodo(nodoLoopFor, $4, $6, "for-cond-inc");
-        struct ASTNodo *cabeceraFor = crearNodo(nodoLoopFor, $3, condInc, "for-cabecera");
-        $$ = crearNodo(nodoLoopFor, cabeceraFor, $8, "for");
+    TokenFor '(' abrirAmbito inicializacionFor condicional ';' condicional ')' cuerpoEstructura cerrarAmbito {
+        struct ASTNodo *condInc = crearNodo(nodoLoopFor, $5, $7, "for-cond-inc");
+        struct ASTNodo *cabeceraFor = crearNodo(nodoLoopFor, $4, condInc, "for-cabecera");
+        $$ = crearNodo(nodoLoopFor, cabeceraFor, $9, "for");
         raizAST = $$;
     }
     // For con paréntesis balanceados pero mal formado por dentro
@@ -274,7 +304,7 @@ loopFor:
     // For con paréntesis desbalanceados o totalmente corrupto
     | TokenFor error '{' abrirAmbito bloqueCodigo cerrarAmbito '}' {
         yyerrok;
-        $$ = crearNodo(nodoLoopFor, NULL, $4, "for-error");
+        $$ = crearNodo(nodoLoopFor, NULL, $5, "for-error");
         raizAST = $$;
     }
 ;
@@ -352,6 +382,8 @@ listaParametros:
 parametro:
       especificadores TokenID {
         $$ = crearNodo(nodoExpresion, $1, NULL, $2.lexema);
+        $$->lineaAct = $2.linea;
+        $$->columnaAct = $2.columna;
         raizAST = $$;
     }
     | especificadores {
@@ -360,6 +392,8 @@ parametro:
     }
     | especificadores '*' TokenID {
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        idNodo->lineaAct = $3.linea;
+        idNodo->columnaAct = $3.columna;
         struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
         $$ = crearNodo(nodoExpresion, $1, ptrNodo, "parametro-puntero");
      
@@ -367,18 +401,21 @@ parametro:
     }
     | especificadores '*' {
        struct ASTNodo *ptrNodo = crearNodoUnario("*", NULL);
-        $$ = crearNodo(nodoExpresion, $1, ptrNodo, "parametro-puntero-anon");
-    
-        raizAST = $$;
+       $$ = crearNodo(nodoExpresion, $1, ptrNodo, "parametro-puntero-anon");
+       raizAST = $$;
     }
     | especificadores TokenID listaDimensiones {
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
+        $$->lineaAct = $2.linea;
+        $$->columnaAct = $2.columna;
         struct ASTNodo *arrNodo = crearNodo(nodoExpresion, idNodo, $3, "parametro-array");
         $$ = crearNodo(nodoExpresion, $1, arrNodo, "parametro");
         raizAST = $$;
     }
     | especificadores '*' TokenID listaDimensiones {
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        $$->lineaAct = $3.linea;
+        $$->columnaAct = $3.columna;
         struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
         struct ASTNodo *arrNodo = crearNodo(nodoExpresion, ptrNodo, $4, "parametro-array");
         $$ = crearNodo(nodoExpresion, $1, arrNodo, "parametro-puntero");
@@ -421,21 +458,30 @@ declaracionVariable:
         raizAST = $$;
     }
     | especificadores TokenID '=' '{' listaElementos '}' ';' {
-        validarYRegistrarSimbolo($2.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($2.lexema, tipoActual, tipoVariable, $2.linea, $2.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, idNodo, $5, "=");
         raizAST = $$;
     }
+    | especificadores TokenID '=' '{' error ';' {
+        validarYRegistrarSimbolo($2.lexema, tipoActual, tipoVariable, $2.linea, $2.columna);
+        yyerrok;
+        $$ = NULL;
+    }
     | especificadores ':' expresion ';' {
         $$ = crearNodo(nodoDeclaracionVariable, $1, $3, "bitfield-anon");
         raizAST = $$;
+    }
+    | especificadores error ';' {
+        yyerrok;
+        $$ = NULL;
     }
 ;
 
 listaIds:
       TokenID {
-        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, $1.linea, $1.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, idNodo, NULL, "var-simple");
@@ -448,7 +494,7 @@ listaIds:
         raizAST = $$;
     }
     | '(' '*' TokenID ')' '(' listaParametros ')' {
-        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, $3.linea, $3.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
@@ -457,7 +503,7 @@ listaIds:
          raizAST = $$;
      }
     | TokenID '=' expresion {
-        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, $1.linea, $1.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         struct ASTNodo *asig = crearNodo(nodoExpresion, idNodo, $3, "=");
@@ -465,7 +511,7 @@ listaIds:
         raizAST = $$;
     }
     | listaIds ',' TokenID {
-        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, $3.linea, $3.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, idNodo, NULL, "var-simple");
@@ -473,7 +519,7 @@ listaIds:
         raizAST = $$;
     }
     | listaIds ',' '*' TokenID {
-        validarYRegistrarSimbolo($4.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($4.lexema, tipoActual, tipoVariable, $4.linea, $4.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $4.lexema);
         struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
@@ -483,7 +529,7 @@ listaIds:
         raizAST = $$;
     }
     | listaIds ',' '(' '*' TokenID ')' '(' listaParametros ')' {
-        validarYRegistrarSimbolo($5.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($5.lexema, tipoActual, tipoVariable, $5.linea, $5.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $5.lexema);
         struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
@@ -493,7 +539,7 @@ listaIds:
         raizAST = $$;
     }
     | listaIds ',' TokenID '=' expresion {
-        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, $3.linea, $3.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *asig = crearNodo(nodoExpresion, idNodo, $5, "=");
@@ -503,14 +549,14 @@ listaIds:
     }
 
     | TokenID ':' expresion {
-        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, $1.linea, $1.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, idNodo, $3, "bitfield");
         raizAST = $$;
     }
     | listaIds ',' TokenID ':' expresion {
-        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, $3.linea, $3.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *nuevoBitfield = crearNodo(nodoDeclaracionVariable, idNodo, $5, "bitfield");
@@ -518,7 +564,7 @@ listaIds:
         raizAST = $$;
     }
     | TokenID '=' '{' listaElementos '}' {
-        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, $1.linea, $1.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         struct ASTNodo *asig = crearNodo(nodoExpresion, idNodo, $4, "=");
@@ -526,7 +572,7 @@ listaIds:
         raizAST = $$;
     }
     | listaIds ',' TokenID '=' '{' listaElementos '}' {
-        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, $3.linea, $3.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *asig = crearNodo(nodoExpresion, idNodo, $6, "=");
@@ -534,25 +580,50 @@ listaIds:
         $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
         raizAST = $$;
     }
+    | TokenID '=' error {
+        validarYRegistrarSimbolo($1.lexema, tipoActual, tipoVariable, $1.linea, $1.columna);
+        yyerrok;
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        $$ = crearNodo(nodoDeclaracionVariable, idNodo, NULL, "var-init-error");
+        raizAST = $$;
+    }
+    | listaIds ',' TokenID '=' error {
+        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, $3.linea, $3.columna);
+        yyerrok;
+        struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
+        struct ASTNodo *nuevaVar = crearNodo(nodoDeclaracionVariable, idNodo, NULL, "var-init-error");
+        $$ = crearNodo(nodoDeclaracionVariable, $1, nuevaVar, "lista-ids");
+        raizAST = $$;
+    }
 ;
 
 declaracionArrays:
     especificadores TokenID listaDimensiones ';' {
-        validarYRegistrarSimbolo($2.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($2.lexema, tipoActual, tipoVariable, $2.linea, $2.columna);
         
         struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $3, $2.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, cabecera, NULL, "matriz");
         raizAST = $$;
     }
     | especificadores TokenID listaDimensiones '=' '{' listaElementos '}' ';' {
-        validarYRegistrarSimbolo($2.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($2.lexema, tipoActual, tipoVariable, $2.linea, $2.columna);
         
         struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $3, $2.lexema);
         $$ = crearNodo(nodoDeclaracionVariable, cabecera, $6, "matriz-init");
         raizAST = $$;
     }
+    | especificadores TokenID listaDimensiones '=' TokenString ';' {
+        char tipoArr[256];
+        snprintf(tipoArr, sizeof(tipoArr), "%s[]", tipoActual);
+        validarYRegistrarSimbolo($2.lexema, tipoArr, tipoVariable, $2.linea, $2.columna);
+        
+        struct ASTNodo *strNodo = crearNodo(nodoExpresion, NULL, NULL, $5.lexema);
+        struct ASTNodo *cabecera = crearNodo(nodoExpresion, $1, $3, $2.lexema);
+        $$ = crearNodo(nodoDeclaracionVariable, cabecera, strNodo, "matriz-init-str");
+        raizAST = $$;
+    }
     | especificadores '*' TokenID '[' ']' '=' '{' listaElementos '}' ';' {
-        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, $3.linea, $3.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
@@ -561,7 +632,7 @@ declaracionArrays:
         raizAST = $$;
     }
     | especificadores '*' TokenID '[' TokenInt ']' '=' '{' listaElementos '}' ';' {
-        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, lineaAct, columnaAct);
+        validarYRegistrarSimbolo($3.lexema, tipoActual, tipoVariable, $3.linea, $3.columna);
         
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $3.lexema);
         struct ASTNodo *ptrNodo = crearNodoUnario("*", idNodo);
@@ -569,6 +640,11 @@ declaracionArrays:
     
         raizAST = $$;
     }
+    | especificadores TokenID '[' error ';' {
+    validarYRegistrarSimbolo($2.lexema, tipoActual, tipoVariable, $2.linea, $2.columna);
+    yyerrok;
+    $$ = NULL;
+}
 ;
 
 listaDimensiones:
@@ -743,8 +819,8 @@ tipoCast:
         obtenerTextoTipo($$, tipoActual, sizeof(tipoActual));
         raizAST = $$;
     }
-    | TokenEnum '{' abrirAmbito listaIds cerrarAmbito '}' {
-        $$ = crearNodo(nodoExpresion, NULL, $3, "def-enum-anon");
+    | TokenEnum '{' { strcpy(tipoActual, "int"); } listaIds '}' {
+        $$ = crearNodo(nodoExpresion, NULL, $4, "def-enum-anon");
         obtenerTextoTipo($$, tipoActual, sizeof(tipoActual));
         raizAST = $$;
     }
@@ -756,16 +832,28 @@ tipoCast:
         obtenerTextoTipo($$, tipoActual, sizeof(tipoActual));
         raizAST = $$;
     }
-    | TokenEnum TokenID '{' abrirAmbito listaIds cerrarAmbito '}' {
+    | TokenEnum TokenID '{' { strcpy(tipoActual, "int"); } listaIds '}' {
         struct ASTNodo *idNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
-        $$ = crearNodo(nodoExpresion, idNodo, $4, "def-enum");
+        $$ = crearNodo(nodoExpresion, idNodo, $5, "def-enum");
         obtenerTextoTipo($$, tipoActual, sizeof(tipoActual));
         raizAST = $$;
     }
-    | TokenModificador TokenEnum '{' abrirAmbito listaIds cerrarAmbito '}' {
+    | TokenModificador TokenEnum '{' { strcpy(tipoActual, "int"); } listaIds '}' {
         struct ASTNodo *mod = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
-        struct ASTNodo *enumNodo = crearNodo(nodoExpresion, NULL, $4, "def-enum-anon");
+        struct ASTNodo *enumNodo = crearNodo(nodoExpresion, NULL, $5, "def-enum-anon");
         $$ = crearNodo(nodoExpresion, mod, enumNodo, "mod-enum");
+        obtenerTextoTipo($$, tipoActual, sizeof(tipoActual));
+        raizAST = $$;
+    }
+    | TokenID {
+        $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        obtenerTextoTipo($$, tipoActual, sizeof(tipoActual));
+        raizAST = $$;
+    }
+    | TokenModificador TokenID {
+        struct ASTNodo *mod = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
+        struct ASTNodo *tipoNodo = crearNodo(nodoExpresion, NULL, NULL, $2.lexema);
+        $$ = crearNodo(nodoExpresion, mod, tipoNodo, "mod-tipo");
         obtenerTextoTipo($$, tipoActual, sizeof(tipoActual));
         raizAST = $$;
     }
@@ -842,7 +930,7 @@ listaModificadores:
 
 expresion:
     TokenID {
-        validarUsoSimbolo($1.lexema, lineaAct, columnaAct);
+        validarUsoSimbolo($1.lexema, $1.linea, $1.columna);
         
         $$ = crearNodo(nodoExpresion, NULL, NULL, $1.lexema);
         raizAST = $$;
@@ -945,10 +1033,6 @@ expresion:
         $$ = crearNodoUnario($1.lexema, $2);
         raizAST = $$;
     }
-    | TokenSizeof expresion %prec UNARIO {
-        $$ = crearNodoUnario("sizeof ", $2);
-        raizAST = $$;
-    }
     | TokenSizeof '(' tipoCast ')' %prec UNARIO {
         $$ = crearNodo(nodoExpresion, $3, NULL, "sizeof-tipo");
         raizAST = $$;
@@ -956,7 +1040,10 @@ expresion:
     | TokenSizeof '(' tipoCast '*' ')' %prec UNARIO {
         struct ASTNodo *ptrNodo = crearNodoUnario("*", $3);
         $$ = crearNodo(nodoExpresion, ptrNodo, NULL, "sizeof-puntero");
-    
+        raizAST = $$;
+    }
+    | TokenSizeof expresion %prec UNARIO {
+        $$ = crearNodoUnario("sizeof ", $2);
         raizAST = $$;
     }
     /* Postfijos */
@@ -998,7 +1085,10 @@ expresion:
         raizAST = $$;
     }
     | TokenID '(' listaArgumentosOpt ')' {
+        validarUsoSimbolo($1.lexema, $1.linea, $1.columna);
         $$ = crearNodo(nodoLlamadaFuncion, $3, NULL, $1.lexema);
+        $$->lineaAct = $1.linea;
+        $$->columnaAct = $1.columna;
         raizAST = $$;
     }
     | expresion TokenFlecha TokenID {

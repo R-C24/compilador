@@ -27,6 +27,8 @@ char *tiposEstandar[] = {
 int totalErrores = 0;
 char tipoActual[256] = "int";
 
+FILE *salidaTablas;
+
 extern FILE *yyin;
 extern int yyleng;
 extern void yyrestart(FILE *new_file);
@@ -125,13 +127,9 @@ int main(int argc, char *argv[]) {
     return EXIT_SUCCESS;
 }
 
-// Agrega la información de un nuevo macro al "diccionario" de macros.
+// Función auxiliar para agregar una macro simple.
 void agregarMacro(char *nombre, char *valor) {
-    if (totalMacros < MaxMacros) {
-        strncpy(macros[totalMacros].nombre, nombre, MaxNombre);
-        strncpy(macros[totalMacros].valor, valor, MaxValor);
-        totalMacros++;
-    }
+    agregarMacroParam(nombre, "", valor);
 }
 
 // Verifica si un carácter puede ser parte de un identificador
@@ -210,16 +208,51 @@ void traducirMacros(char *linea) {
     int traducido = 1;
     int limitePasadas = 0;
 
-    while (traducido && limitePasadas < 15) {
+    while (traducido && limitePasadas < 25) {
         traducido = 0;
         for (int i = 0; i < totalMacros; i++) {
             char *pos = buscarMacroValida(linea, macros[i].nombre);
-            if (pos != NULL) {
-                int antes = pos - linea;
+            if (pos == NULL) continue;
+
+            int antes = (int)(pos - linea);
+            size_t lenNombre = strlen(macros[i].nombre);
+
+            // Macro con 1 parámetro
+            if (macros[i].parametro[0] != '\0') {
+                char *p = pos + lenNombre;
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p != '(') continue; // Si no lleva '(', no se expande
+
+                // Buscar el ')' balanceado que cierra la llamada
+                p++;
+                char *inicioArg = p;
+                int nivelParen = 1;
+                while (*p != '\0' && nivelParen > 0) {
+                    if (*p == '(') nivelParen++;
+                    else if (*p == ')') nivelParen--;
+                    if (nivelParen > 0) p++;
+                }
+                if (nivelParen != 0) continue; // Paréntesis sin cerrar
+
+                char argReal[MaxValor];
+                size_t lenArg = (size_t)(p - inicioArg);
+                if (lenArg >= sizeof(argReal)) lenArg = sizeof(argReal) - 1;
+                strncpy(argReal, inicioArg, lenArg);
+                argReal[lenArg] = '\0';
+
+                char expansion[MaxValor];
+                sustituirParametroEnCuerpo(macros[i].valor, macros[i].parametro, argReal, expansion, sizeof(expansion));
+
                 snprintf(resultado, sizeof(resultado), "%.*s%s%s",
-                         antes, linea,
-                         macros[i].valor,
-                         pos + strlen(macros[i].nombre));
+                         antes, linea, expansion, p + 1);
+                strcpy(linea, resultado);
+                traducido = 1;
+                break;
+            }
+            // Macro simple sin parámetros
+            else {
+                snprintf(resultado, sizeof(resultado), "%.*s%s%s",
+                         antes, linea, macros[i].valor, pos + lenNombre);
                 strcpy(linea, resultado);
                 traducido = 1;
                 break;
@@ -227,12 +260,70 @@ void traducirMacros(char *linea) {
         }
         limitePasadas++;
     }
-    if (limitePasadas >= 15)
-    {
-        fprintf(stderr, "Advertencia: se encontró un ciclo en los #define.\n");
+}
+
+int macroDefinida(const char *nombre) {
+    for (int i = 0; i < totalMacros; i++) {
+        if (strcmp(macros[i].nombre, nombre) == 0) return 1;
+    }
+    return 0;
+}
+
+// Agrega la información de un nuevo macro al "diccionario" de macros.
+void agregarMacroParam(const char *nombre, const char *parametro, const char *valor) {
+    // Si ya existía, sobrescribirla (#ifdef / #else)
+    for (int i = 0; i < totalMacros; i++) {
+        if (strcmp(macros[i].nombre, nombre) == 0) {
+            strncpy(macros[i].parametro, parametro ? parametro : "", MaxNombre - 1);
+            macros[i].parametro[MaxNombre - 1] = '\0';
+            strncpy(macros[i].valor, valor ? valor : "", MaxValor - 1);
+            macros[i].valor[MaxValor - 1] = '\0';
+            return;
+        }
+    }
+
+    if (totalMacros < MaxMacros) {
+        strncpy(macros[totalMacros].nombre, nombre, MaxNombre - 1);
+        macros[totalMacros].nombre[MaxNombre - 1] = '\0';
+        strncpy(macros[totalMacros].parametro, parametro ? parametro : "", MaxNombre - 1);
+        macros[totalMacros].parametro[MaxNombre - 1] = '\0';
+        strncpy(macros[totalMacros].valor, valor ? valor : "", MaxValor - 1);
+        macros[totalMacros].valor[MaxValor - 1] = '\0';
+        totalMacros++;
     }
 }
 
+// Reemplaza todas las ocurrencias de 'param' (como palabra completa) en 'cuerpo' por 'arg'
+void sustituirParametroEnCuerpo(const char *cuerpo, const char *param, const char *arg, char *salida, size_t maxLen) {
+    salida[0] = '\0';
+    size_t lenParam = strlen(param);
+    size_t outIdx = 0;
+
+    for (size_t i = 0; cuerpo[i] != '\0' && outIdx < maxLen - 1; ) {
+        if (strncmp(&cuerpo[i], param, lenParam) == 0) {
+            int limIzq = (i == 0) || !esCaracterIdentificador(cuerpo[i - 1]);
+            int limDer = !esCaracterIdentificador(cuerpo[i + lenParam]);
+            if (limIzq && limDer) {
+                size_t lenArg = strlen(arg);
+                if (outIdx + lenArg < maxLen - 1) {
+                    strcpy(&salida[outIdx], arg);
+                    outIdx += lenArg;
+                }
+                i += lenParam;
+                continue;
+            }
+        }
+        salida[outIdx++] = cuerpo[i++];
+    }
+    salida[outIdx] = '\0';
+}
+
+void recortarDerecha(char *str) {
+    size_t len = strlen(str);
+    while (len > 0 && (str[len - 1] == '\n' || str[len - 1] == '\r' || str[len - 1] == ' ' || str[len - 1] == '\t')) {
+        str[--len] = '\0';
+    }
+}
 
 // Abre el archivo, revisa y procesa recursivamente los include y los define.
 void procesarArchivo(char *nombreArchivo, FILE *f_out) {
@@ -244,35 +335,90 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
 
     char linea[TamBuffer];
     int numLinea = 0;
+    int enCondicional = 0;
+    int ignorarBloque = 0;
 
     while (fgets(linea, sizeof(linea), f_in)) {
         numLinea++;
 
-        if (strncmp(linea, "#include", 8) == 0) {
-            char subArchivo[MaxNombre] = "";
+        char *ptr = linea;
+        while (*ptr == ' ' || *ptr == '\t') ptr++;
 
-            if (sscanf(linea, "#include \"%[^\"]\"", subArchivo) == 1) {
-                procesarArchivo(subArchivo, f_out);
-                continue;
+        if (strncmp(ptr, "#ifdef", 6) == 0 && !esCaracterIdentificador(ptr[6])) {
+            char sim[MaxNombre] = "";
+            sscanf(ptr + 6, " %s", sim);
+            enCondicional = 1;
+            ignorarBloque = !macroDefinida(sim);
+            fputc('\n', f_out);
+            continue;
+        }
+        if (strncmp(ptr, "#ifndef", 7) == 0 && !esCaracterIdentificador(ptr[7])) {
+            char sim[MaxNombre] = "";
+            sscanf(ptr + 7, " %s", sim);
+            enCondicional = 1;
+            ignorarBloque = macroDefinida(sim);
+            fputc('\n', f_out);
+            continue;
+        }
+        if (strncmp(ptr, "#else", 5) == 0 && !esCaracterIdentificador(ptr[5])) {
+            if (enCondicional) {
+                ignorarBloque = !ignorarBloque;
             }
-            else if (sscanf(linea, "#include <%[^>]>", subArchivo) == 1) {
-                fputc('\n', f_out);
-                continue;
-            } else {
-                fprintf(stderr, "Error de preprocesamiento: Directiva #include vacía o mal formada en '%s' (línea %d): %s", nombreArchivo, numLinea, linea);
-                exit(EXIT_FAILURE);
-            }
+            fputc('\n', f_out);
+            continue;
+        }
+        if (strncmp(ptr, "#endif", 6) == 0 && !esCaracterIdentificador(ptr[6])) {
+            enCondicional = 0;
+            ignorarBloque = 0;
+            fputc('\n', f_out);
+            continue;
         }
 
-        if (strncmp(linea, "#define", 7) == 0) {
-            char nombre[MaxNombre];
-            char valor[MaxValor];
+        // Si estamos dentro de una rama falsa de #ifdef/#else, emitir '\n' y saltar la línea
+        if (ignorarBloque) {
+            fputc('\n', f_out);
+            continue;
+        }
 
-            if (sscanf(linea, "#define %s %[^\n]", nombre, valor) >= 2) {
-                agregarMacro(nombre, valor);
-                fputs("\n", f_out);
-                continue;
+        if (strncmp(ptr, "#define", 7) == 0 && !esCaracterIdentificador(ptr[7])) {
+            char *p = ptr + 7;
+            while (*p == ' ' || *p == '\t') p++;
+
+            char nombre[MaxNombre] = "";
+            char param[MaxNombre] = "";
+            char valor[MaxValor] = "";
+
+            int k = 0;
+            while (esCaracterIdentificador(*p) && k < MaxNombre - 1) {
+                nombre[k++] = *p++;
             }
+            nombre[k] = '\0';
+
+            // Verificar si tiene lista de parámetro pegada al nombre: NOMBRE(arg)
+            if (*p == '(') {
+                p++;
+                while (*p == ' ' || *p == '\t') p++;
+                int j = 0;
+                while (esCaracterIdentificador(*p) && j < MaxNombre - 1) {
+                    param[j++] = *p++;
+                }
+                param[j] = '\0';
+                while (*p != '\0' && *p != ')') p++;
+                if (*p == ')') p++;
+            }
+
+            // Lo que queda después de espacios es el cuerpo (puede ser vacío "")
+            while (*p == ' ' || *p == '\t') p++;
+            strncpy(valor, p, MaxValor - 1);
+            valor[MaxValor - 1] = '\0';
+            recortarDerecha(valor);
+
+            if (nombre[0] != '\0') {
+                agregarMacroParam(nombre, param, valor);
+            }
+
+            fputc('\n', f_out);
+            continue;
         }
 
         traducirMacros(linea);
@@ -288,16 +434,24 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
 void inicializarPila() {
     topePila = -1;
     pushAmbito();
+    registrarSimbolosEstandar();
 }
 
 // Agrega a la pila una nueva tabla de símbolos al entrar a un nuevo contexto
-void pushAmbito() {
+void pushAmbitoConContexto(const char *funcion, const char *parametros) {
     if (topePila >= MaxAmbitos - 1) {
         fprintf(stderr, "Error: Desbordamiento de pila de ámbitos.\n");
         return;
     }
+
     topePila++;
     pilaTablas[topePila].raiz = NULL;
+    pilaTablas[topePila].nombreFuncion = funcion ? strdup(funcion) : NULL;
+    pilaTablas[topePila].parametrosFuncion = parametros ? strdup(parametros) : NULL;
+}
+
+void pushAmbito() {
+    pushAmbitoConContexto(NULL, NULL);
 }
 
 // Saca de la pila la tabla de símbolos al salir de un contexto
@@ -316,6 +470,16 @@ void popAmbito() {
         free(temp);
     }
     pilaTablas[topePila].raiz = NULL;
+
+    if (pilaTablas[topePila].nombreFuncion) {
+        free(pilaTablas[topePila].nombreFuncion);
+        pilaTablas[topePila].nombreFuncion = NULL;
+    }
+    if (pilaTablas[topePila].parametrosFuncion) {
+        free(pilaTablas[topePila].parametrosFuncion);
+        pilaTablas[topePila].parametrosFuncion = NULL;
+    }
+
     topePila--;
 }
 
@@ -341,6 +505,7 @@ RegistroSemantico* insertarSimbolo(char *lexema, char *tipoDato, CategoriaSimbol
     nuevo->nivelAmbito = topePila;
     nuevo->lineaDeclaracion = linea;
     nuevo->columnaDeclaracion = columna;
+    nuevo->esPrototipo = 0;
     
     // Insertar al inicio de la lista enlazada del ámbito actual
     nuevo->siguiente = pilaTablas[topePila].raiz;
@@ -365,11 +530,14 @@ RegistroSemantico* buscarSimbolo(char *lexema) {
 }
 
 // Imprime la tabla actual por consola al cerrar un contexto
-void imprimirTablaActual() {
+void imprimirTablaActual2() {
     if (topePila < 0) {
         return;
     }
-    printf("--- Tabla de Simbolos (Ambito Nivel %d) ---\n", topePila);
+
+    FILE *f_salida = (salidaTablas != NULL) ? salidaTablas : stdout;
+
+    fprintf("--- Tabla de Simbolos (Ambito Nivel %d) ---\n", topePila);
     RegistroSemantico *actual = pilaTablas[topePila].raiz;
     while (actual != NULL) {
         printf("Nombre: %s | Tipo: %s | Categoria: %d | Nivel: %d\n", 
@@ -377,6 +545,49 @@ void imprimirTablaActual() {
         actual = actual->siguiente;
     }
     printf("-------------------------------------------\n");
+}
+
+// Imprime la tabla actual al cerrar un contexto
+void imprimirTablaActual() {
+    if (topePila < 0) {
+        return;
+    }
+
+    FILE *f_salida = (salidaTablas != NULL) ? salidaTablas : stdout;
+
+    fprintf(f_salida, "==================================================\n");
+    fprintf(f_salida, "--- Tabla de Simbolos (Ambito Nivel %d) ---\n", topePila);
+
+    // 1. Desplegar metadatos de la función si el ámbito actual pertenece a una
+    if (pilaTablas[topePila].nombreFuncion != NULL) {
+        fprintf(f_salida, "Funcion   : %s\n", pilaTablas[topePila].nombreFuncion);
+        fprintf(f_salida, "Parametros: %s\n", 
+                (pilaTablas[topePila].parametrosFuncion && strlen(pilaTablas[topePila].parametrosFuncion) > 0) 
+                ? pilaTablas[topePila].parametrosFuncion 
+                : "ninguno");
+    } 
+    // Si es un ámbito interno (for/while/if) dentro de una función activa
+    else if (strlen(funcionActual) > 0) {
+        fprintf(f_salida, "Contexto de Funcion: %s\n", funcionActual);
+    }
+    
+    fprintf(f_salida, "--------------------------------------------------\n");
+
+    // 2. Desplegar los símbolos contenidos en la tabla
+    RegistroSemantico *actual = pilaTablas[topePila].raiz;
+    if (actual == NULL) {
+        fprintf(f_salida, "(Tabla vacia)\n");
+    } else {
+        while (actual != NULL) {
+            fprintf(f_salida, "Nombre: %-15s | Tipo: %-12s | Categoria: %d | Nivel: %d\n", 
+                    actual->lexema, 
+                    actual->tipoDato ? actual->tipoDato : "desconocido", 
+                    actual->categoria, 
+                    actual->nivelAmbito);
+            actual = actual->siguiente;
+        }
+    }
+    fprintf(f_salida, "==================================================\n\n");
 }
 
 void reportarRedeclaracion(const char *archivo, const char *lexema, const char *tipoDato,
@@ -412,6 +623,46 @@ void validarYRegistrarSimbolo(const char *lexema, const char *tipoDetectado, Cat
         reportarRedeclaracion(archivoFuente, lexema, previo->tipoDato,
                              lineaAct, columnaAct, lenActual,
                              previo->lineaDeclaracion, previo->columnaDeclaracion, lenPrevio);
+    }
+}
+
+void validarYRegistrarFuncion(const char *lexema, const char *tipoRet, int esDefinicion, int linea, int col) {
+    if (!lexema || topePila < 0) return;
+
+    const char *tipoSeguro = (tipoRet && tipoRet[0] != '\0') ? tipoRet : "int";
+    RegistroSemantico *previo = buscarEnAmbitoActual(lexema);
+
+    if (previo != NULL) {
+        const char *tipoPrevio = previo->tipoDato ? previo->tipoDato : "int";
+
+        if (previo->categoria == tipoFuncion && esDefinicion == 0 && strcmp(tipoPrevio, tipoSeguro) == 0) {
+            return;
+        }
+
+        // Caso válido, ya existía como prototipo y ahora llega su definición con cuerpo
+        if (previo->categoria == tipoFuncion && previo->esPrototipo == 1 && esDefinicion == 1) {
+            previo->esPrototipo = 0;
+            previo->lineaDeclaracion = linea;
+            previo->columnaDeclaracion = col;
+            return;
+        }
+
+        int lenActual = (int)strlen(lexema);
+        int lenPrevio = previo->lexema ? (int)strlen(previo->lexema) : lenActual;
+
+        reportarRedeclaracion(archivoFuente ? archivoFuente : "entrada.c",
+                              lexema, tipoPrevio,
+                              linea, col, lenActual,
+                              previo->lineaDeclaracion, previo->columnaDeclaracion, lenPrevio);
+        return;
+    }
+
+    // No existía: insertarla como tipoFuncion
+    insertarSimbolo((char*)lexema, (char*)tipoSeguro, tipoFuncion, linea, col);
+
+    RegistroSemantico *nuevo = buscarEnAmbitoActual(lexema);
+    if (nuevo != NULL) {
+        nuevo->esPrototipo = (esDefinicion == 0) ? 1 : 0;
     }
 }
 
@@ -587,8 +838,165 @@ void validarUsoSimbolo(const char *lexema, int lineaAct, int columnaAct) {
         nuevo->nivelAmbito = nivelFuncion;
         nuevo->lineaDeclaracion = lineaAct;
         nuevo->columnaDeclaracion = columnaAct;  
-        
+        nuevo->esPrototipo = 0;
         nuevo->siguiente = pilaTablas[nivelFuncion].raiz;
         pilaTablas[nivelFuncion].raiz = nuevo;
     }
+}
+
+// Convierte recursivamente el árbol sintáctico de parámetros en una cadena de texto (ej. "int a, const char *b")
+void obtenerTextoParametrosAux(struct ASTNodo *nodo, char *buffer, size_t tam) {
+    if (!nodo) return;
+
+    // Si es un nodo de unión/lista de parámetros (ej. con lexema "lista-parametros" o ",")
+    if (nodo->valorLexema && (strcmp(nodo->valorLexema, "lista-parametros") == 0 || strcmp(nodo->valorLexema, ",") == 0)) {
+        obtenerTextoParametrosAux(nodo->izq, buffer, tam);
+        if (strlen(buffer) > 0) {
+            strncat(buffer, ", ", tam - strlen(buffer) - 1);
+        }
+        obtenerTextoParametrosAux(nodo->der, buffer, tam);
+    } 
+    else {
+        // Es un parámetro individual
+        char tempTipo[128] = "";
+
+        // Si tiene especificadores de tipo (nodo->izq)
+        if (nodo->izq) {
+            obtenerTextoTipo(nodo->izq, tempTipo, sizeof(tempTipo));
+        }
+
+        // Construir "tipo nombre" o "tipo" si es anónimo
+        char tempParam[256] = "";
+        if (strlen(tempTipo) > 0 && nodo->valorLexema && strcmp(nodo->valorLexema, "parametro-tipo") != 0) {
+            snprintf(tempParam, sizeof(tempParam), "%s %s", tempTipo, nodo->valorLexema);
+        } else if (strlen(tempTipo) > 0) {
+            snprintf(tempParam, sizeof(tempParam), "%s", tempTipo);
+        } else if (nodo->valorLexema) {
+            snprintf(tempParam, sizeof(tempParam), "%s", nodo->valorLexema);
+        }
+
+        strncat(buffer, tempParam, tam - strlen(buffer) - 1);
+    }
+}
+
+// Retorna un string dinámico formateado con los parámetros (el llamador debe liberar la memoria o usarlo en la llamada)
+char* obtenerTextoParametros(struct ASTNodo *nodoParams) {
+    if (!nodoParams) {
+        return strdup("void");
+    }
+    char buffer[512] = "";
+    obtenerTextoParametrosAux(nodoParams, buffer, sizeof(buffer));
+    return strdup(strlen(buffer) > 0 ? buffer : "void");
+}
+
+// Registra cada parámetro en la tabla de símbolos del ámbito recién abierto
+void registrarParametrosEnTabla(struct ASTNodo *nodo) {
+    if (!nodo) return;
+
+    if (nodo->valorLexema && (strcmp(nodo->valorLexema, "lista-parametros") == 0 || strcmp(nodo->valorLexema, ",") == 0)) {
+        registrarParametrosEnTabla(nodo->izq);
+        registrarParametrosEnTabla(nodo->der);
+        return;
+    }
+
+    // Extrae el tipo base desde nodo->izq
+    char tipoParam[128] = "int";
+    if (nodo->izq) {
+        obtenerTextoTipo(nodo->izq, tipoParam, sizeof(tipoParam));
+    }
+
+    // Agrega sufijos de puntero/arreglo si existen en nodo->der
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "parametro-puntero") == 0) {
+        strncat(tipoParam, " *", sizeof(tipoParam) - strlen(tipoParam) - 1);
+    }
+    if (nodo->der && nodo->der->valorLexema && strcmp(nodo->der->valorLexema, "parametro-array") == 0) {
+        strncat(tipoParam, "[]", sizeof(tipoParam) - strlen(tipoParam) - 1);
+    }
+
+    // Extrae el nodo del identificador real, ignora parámetros anónimos
+    struct ASTNodo *idNodo = extraerNodoIdParametro(nodo);
+    if (idNodo && idNodo->valorLexema) {
+        validarYRegistrarSimbolo(idNodo->valorLexema, tipoParam, tipoParametro, idNodo->lineaAct, idNodo->columnaAct);
+    }
+}
+
+// Extrae el identificador real del subárbol de un nodo 
+struct ASTNodo* extraerNodoIdParametro(struct ASTNodo *nodo) {
+    if (!nodo || !nodo->valorLexema) return NULL;
+
+    // Caso 1: Parámetro simple, el lexema está en la raíz
+    if (strcmp(nodo->valorLexema, "parametro") != 0 &&
+        strcmp(nodo->valorLexema, "parametro-puntero") != 0 &&
+        strcmp(nodo->valorLexema, "parametro-array") != 0 &&
+        strcmp(nodo->valorLexema, "parametro-tipo") != 0 &&
+        strcmp(nodo->valorLexema, "parametro-puntero-anon") != 0 &&
+        strcmp(nodo->valorLexema, "parametro-error") != 0 &&
+        strcmp(nodo->valorLexema, "unario:*") != 0 &&
+        strcmp(nodo->valorLexema, "*") != 0) {
+        return nodo;
+    }
+
+    // Caso 2: Parámetro compuesto
+    struct ASTNodo *actual = nodo->der;
+    while (actual != NULL) {
+        if (actual->valorLexema &&
+            strcmp(actual->valorLexema, "parametro-array") != 0 &&
+            strcmp(actual->valorLexema, "unario:*") != 0 &&
+            strcmp(actual->valorLexema, "*") != 0) {
+            return actual; 
+        }
+        actual = actual->izq;
+    }
+
+    return NULL;
+}
+
+// Busca un símbolo en el ámbito actual
+RegistroSemantico* buscarEnAmbitoActual(const char *lexema) {
+    if (!lexema || topePila < 0) return NULL;
+
+    RegistroSemantico *actual = pilaTablas[topePila].raiz;
+    while (actual != NULL) {
+        if (actual->lexema && strcmp(actual->lexema, lexema) == 0) {
+            return actual;
+        }
+        actual = actual->siguiente;
+    }
+    return NULL;
+}
+
+// Pre-registra funciones y constantes comunes de <stdio.h>, <stdlib.h>, <string.h>, etc. en Nivel 0
+void registrarSimbolosEstandar() {
+    // 1. Funciones estándar (Categoria: tipoFuncion)
+    const char *funcionesStd[] = {
+        // <stdio.h>
+        "printf", "fprintf", "sprintf", "snprintf", "scanf", "fscanf", "sscanf",
+        "fopen", "fclose", "fread", "fwrite", "fgets", "fputs", "fgetc", "fputc",
+        "getchar", "putchar", "puts", "perror", "fflush", "fseek", "ftell", "rewind",
+        // <stdlib.h>
+        "malloc", "calloc", "realloc", "free", "exit", "abort", "atoi", "atof", "atol",
+        "strtol", "strtod", "rand", "srand", "qsort", "bsearch", "system", "getenv",
+        // <string.h>
+        "strlen", "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp",
+        "strchr", "strrchr", "strstr", "strtok", "memcpy", "memmove", "memset", "memcmp",
+        // <ctype.h> / <math.h>
+        "isalpha", "isdigit", "isalnum", "isspace", "toupper", "tolower",
+        "sqrt", "pow", "sin", "cos", "tan", "abs", "fabs", "ceil", "floor",
+        NULL
+    };
+
+    for (int i = 0; funcionesStd[i] != NULL; i++) {
+        insertarSimbolo((char*)funcionesStd[i], "extern", tipoFuncion, 0, 0);
+    }
+
+    // 2. Constantes, macros estándar y flujos globales (Categoria: tipoVariable)
+    insertarSimbolo("NULL", "void *", tipoVariable, 0, 0);
+    insertarSimbolo("EOF", "int", tipoVariable, 0, 0);
+    insertarSimbolo("EXIT_SUCCESS", "int", tipoVariable, 0, 0);
+    insertarSimbolo("EXIT_FAILURE", "int", tipoVariable, 0, 0);
+    insertarSimbolo("true", "bool", tipoVariable, 0, 0);
+    insertarSimbolo("false", "bool", tipoVariable, 0, 0);
+    insertarSimbolo("stdin", "FILE *", tipoVariable, 0, 0);
+    insertarSimbolo("stdout", "FILE *", tipoVariable, 0, 0);
+    insertarSimbolo("stderr", "FILE *", tipoVariable, 0, 0);
 }
