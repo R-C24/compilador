@@ -4,9 +4,11 @@
 #define MaxMacros 100
 #define MaxNombre 64
 #define MaxValor 256
-#define TamBuffer 1024
+#define TamBuffer 2048
 #define MaxTipos 256
 #define MaxAmbitos 500 //FALTAN PRUEBAS DE ESTRES
+#define MaxArchivosIncluidos 64
+#define MaxProfundidadInclude 32
 
 typedef struct Macro Macro;
 struct Macro{
@@ -24,6 +26,9 @@ extern char *tiposUsuario[MaxTipos];
 extern int totalTiposUsuario;
 extern char *tiposEstandar[];
 extern int totalErrores;
+
+extern char archivosEnProceso[MaxProfundidadInclude][MaxNombre];
+extern int profundidadInclude;
 
 void agregarMacro(char *nombre, char *valor);
 int macroDefinida(const char *nombre);
@@ -144,6 +149,17 @@ char* obtenerTextoParametros(struct ASTNodo *nodoParams);
 void obtenerTextoParametrosAux(struct ASTNodo *nodo, char *buffer, size_t tam);
 struct ASTNodo* extraerNodoIdParametro(struct ASTNodo *nodo);
 
-void registrarSimbolosEstandar()
+void registrarSimbolosEstandar();
+char* crearTipoPuntero(const char *tipoBase);
+void agregarPunteroAUltimoSimbolo();
+const char* obtenerNombreCategoria(CategoriaSimbolo cat);
+int esInclusionCircular(const char *nombreArchivo);
+void limpiarTemporalAlSalir();
+
+int esFuncionEstandar(const char *lexema);
+int esConstanteEstandar(const char *lexema);
+void validarLlamadaFuncion(const char *lexema, int lineaAct, int columnaAct);
+void formatearTipoConDimensiones(const char *tipoBase, struct ASTNodo *dims, char *salida, size_t tam);
+int contarPunteros(struct ASTNodo *nodo);
 
 #endif //COMPILADOR_H

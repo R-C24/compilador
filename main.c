@@ -27,6 +27,9 @@ char *tiposEstandar[] = {
 int totalErrores = 0;
 char tipoActual[256] = "int";
 
+char archivosEnProceso[MaxProfundidadInclude][MaxNombre];
+int profundidadInclude = 0;
+
 FILE *salidaTablas;
 
 extern FILE *yyin;
@@ -34,29 +37,38 @@ extern int yyleng;
 extern void yyrestart(FILE *new_file);
 extern struct ASTNodo *raizAST;
 extern int yyparse();
+
+int mostrarTablas;
+
 const char *archivoFuente = NULL;
 
 int main(int argc, char *argv[]) {
+    atexit(limpiarTemporalAlSalir);
+
     int opt;
     int activarPreproceso = 0; // El preproceso está desactivado por defecto.
-    int reemplazarOriginal = 0; // Está desactivado por defecto.
-    while ((opt = getopt(argc, argv, "prgb")) != -1) {
+    char *archivoTablas = NULL;
+    mostrarTablas = 1;
+
+    while ((opt = getopt(argc, argv, "pso:")) != -1) {
         switch (opt) {
             case 'p':
                 activarPreproceso = 1;
                 break;
-            case 'r':
-                reemplazarOriginal = 1;
+            case 's':
+                mostrarTablas = 1;
                 break;
+            case 'o':
+                archivoTablas = optarg;
                 break;
             default:
                 fprintf(stderr, "\nError: no es una opción válida.\n");
-                fprintf(stderr, "Uso correcto: %s [-p] [-r] [-g|-b] <archivo.c>\n\n", argv[0]);
+                fprintf(stderr, "Uso correcto: %s [-p] [-s] [-o <archivo>] <archivo.c>\n\n", argv[0]);
                 fprintf(stderr, "Opciones disponibles:\n");
                 fprintf(stderr, "  -p    Activa el preprocesador opcional.\n");
-                fprintf(stderr, "  -r    Reemplaza el archivo fuente original con el prettyprint.\n");
-                fprintf(stderr, "  -g    Aplica el formato de Estilo GNU.\n");
-                fprintf(stderr, "  -b    Aplica el formato de Estilo BSD.\n\n");
+                fprintf(stderr, "  -s    Despliega cada tabla de símbolos al cerrar contexto.\n");
+                fprintf(stderr, "  -o <archivo>  Redirige la salida de las tablas hacia <archivo>.\n\n");
+
                 return EXIT_FAILURE;
         }
     }
@@ -65,6 +77,13 @@ int main(int argc, char *argv[]) {
         archivoFuente = argv[optind];
     } else {
         fprintf(stderr, "Error: Falta el archivo fuente .c de entrada.\n");
+
+        fprintf(stderr, "Uso correcto: %s [-p] [-s] [-o <archivo>] <archivo.c>\n\n", argv[0]);
+        fprintf(stderr, "Opciones disponibles:\n");
+        fprintf(stderr, "  -p    Activa el preprocesador opcional.\n");
+        fprintf(stderr, "  -s    Despliega cada tabla de símbolos al cerrar contexto.\n");
+        fprintf(stderr, "  -o <archivo>  Redirige la salida de las tablas hacia <archivo>.\n\n");
+
         return EXIT_FAILURE;
     }
 
@@ -73,8 +92,18 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    char *archivoTemporal = "archivoTemp.tmp";
-    char *archivoParaEscanear = NULL;
+    if (mostrarTablas && archivoTablas != NULL) {
+        salidaTablas = fopen(archivoTablas, "w");
+        if (!salidaTablas) {
+            perror("Error al abrir el archivo de salida de tablas");
+            return EXIT_FAILURE;
+        }
+    } else {
+        salidaTablas = stdout;
+    }
+
+    const char *archivoTemporal = "archivoTemp.tmp";
+    const char *archivoParaEscanear = NULL;
 
     if (activarPreproceso) {
         printf("Ejecutando Preprocesador...\n");
@@ -82,13 +111,14 @@ int main(int argc, char *argv[]) {
         FILE *f_temp = fopen(archivoTemporal, "w");
         if (!f_temp) {
             perror("Error al crear el archivo temporal");
+            if (salidaTablas != stdout) fclose(salidaTablas);
             exit(EXIT_FAILURE);
         }
 
         procesarArchivo(archivoFuente, f_temp);
         fclose(f_temp);
-
         archivoParaEscanear = archivoTemporal;
+
     } else {
         printf("Preprocesador desactivado.\n");
         archivoParaEscanear = archivoFuente;
@@ -101,30 +131,31 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    printf("Iniciando análisis sintáctico con Bison...\n");
-
     printf("Iniciando análisis y construcción de tabla de símbolos...\n");
     inicializarPila();
-    
-    if (yyparse() == 0 && totalErrores == 0 && raizAST != NULL) {
-        char archivoSalida[512];
-    }
+    yyparse();
 
-    printf("\n--- Cierre del Contexto Global ---\n");
+    if (salidaTablas == stdout) {
+        printf("\n--- Cierre del Contexto Global ---\n");
+    }
     popAmbito();
+
+    fclose(yyin);
+    if (activarPreproceso) {
+        remove(archivoTemporal);
+    }
+    if (salidaTablas != NULL && salidaTablas != stdout) {
+        fclose(salidaTablas);
+    }
 
     if (totalErrores > 0) {
         fprintf(stderr, "\nCompilación fallida: se encontraron %d error(es).\n", totalErrores);
         return EXIT_FAILURE;
-    } else {
-        printf("Compilación exitosa sin errores.\n");
-        return EXIT_SUCCESS;
     }
 
-    fclose(yyin);
-
-    printf("Proceso del Proyecto 1 finalizado.\n");
+    printf("Compilación exitosa sin errores.\n");
     return EXIT_SUCCESS;
+
 }
 
 // Función auxiliar para agregar una macro simple.
@@ -221,9 +252,7 @@ void traducirMacros(char *linea) {
             if (macros[i].parametro[0] != '\0') {
                 char *p = pos + lenNombre;
                 while (*p == ' ' || *p == '\t') p++;
-                if (*p != '(') continue; // Si no lleva '(', no se expande
-
-                // Buscar el ')' balanceado que cierra la llamada
+                if (*p != '(' ) continue; 
                 p++;
                 char *inicioArg = p;
                 int nivelParen = 1;
@@ -271,7 +300,7 @@ int macroDefinida(const char *nombre) {
 
 // Agrega la información de un nuevo macro al "diccionario" de macros.
 void agregarMacroParam(const char *nombre, const char *parametro, const char *valor) {
-    // Si ya existía, sobrescribirla (#ifdef / #else)
+    // Si ya existía, sobrescribirla
     for (int i = 0; i < totalMacros; i++) {
         if (strcmp(macros[i].nombre, nombre) == 0) {
             strncpy(macros[i].parametro, parametro ? parametro : "", MaxNombre - 1);
@@ -327,11 +356,32 @@ void recortarDerecha(char *str) {
 
 // Abre el archivo, revisa y procesa recursivamente los include y los define.
 void procesarArchivo(char *nombreArchivo, FILE *f_out) {
+
+    if (esInclusionCircular(nombreArchivo)) {
+        fprintf(stderr, "Error de preprocesamiento: Inclusión circular detectada con '%s'.\n", nombreArchivo);
+        if (f_out) fclose(f_out);
+        remove("archivoTemp.tmp");
+        exit(EXIT_FAILURE);
+    }
+
+    if (profundidadInclude >= MaxProfundidadInclude) {
+        fprintf(stderr, "Error de preprocesamiento: Profundidad máxima de #include excedida en '%s'.\n", nombreArchivo);
+        if (f_out) fclose(f_out);
+        remove("archivoTemp.tmp");
+        exit(EXIT_FAILURE);
+    }
+
     FILE *f_in = fopen(nombreArchivo, "r");
     if (!f_in) {
         fprintf(stderr, "Error: No se pudo abrir el archivo fuente '%s'.\n", nombreArchivo);
+        if (f_out) fclose(f_out);
+        remove("archivoTemp.tmp");
         exit(EXIT_FAILURE);
     }
+
+    strncpy(archivosEnProceso[profundidadInclude], nombreArchivo, MaxNombre - 1);
+    archivosEnProceso[profundidadInclude][MaxNombre - 1] = '\0';
+    profundidadInclude++;
 
     char linea[TamBuffer];
     int numLinea = 0;
@@ -380,6 +430,23 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
             continue;
         }
 
+        if (strncmp(ptr, "#include", 8) == 0 && !esCaracterIdentificador(ptr[8])) {
+            char subArchivo[MaxNombre] = "";
+            if (sscanf(ptr + 8, " \"%[^\"]\"", subArchivo) == 1) {
+                procesarArchivo(subArchivo, f_out);
+                fputc('\n', f_out);
+                continue;
+            } else if (sscanf(ptr + 8, " <%[^>]>", subArchivo) == 1) {
+                fputc('\n', f_out);
+                continue;
+            } else {
+                fprintf(stderr, "Error de preprocesamiento: Directiva #include vacía o mal formada en '%s' (línea %d): %s",
+                        nombreArchivo, numLinea, linea);
+                fclose(f_in);
+                exit(EXIT_FAILURE);
+            }
+        }
+
         if (strncmp(ptr, "#define", 7) == 0 && !esCaracterIdentificador(ptr[7])) {
             char *p = ptr + 7;
             while (*p == ' ' || *p == '\t') p++;
@@ -394,7 +461,6 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
             }
             nombre[k] = '\0';
 
-            // Verificar si tiene lista de parámetro pegada al nombre: NOMBRE(arg)
             if (*p == '(') {
                 p++;
                 while (*p == ' ' || *p == '\t') p++;
@@ -424,6 +490,8 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
         traducirMacros(linea);
         fputs(linea, f_out);
     }
+
+    profundidadInclude--;
     fclose(f_in);
 }
 
@@ -434,7 +502,6 @@ void procesarArchivo(char *nombreArchivo, FILE *f_out) {
 void inicializarPila() {
     topePila = -1;
     pushAmbito();
-    registrarSimbolosEstandar();
 }
 
 // Agrega a la pila una nueva tabla de símbolos al entrar a un nuevo contexto
@@ -456,7 +523,7 @@ void pushAmbito() {
 
 // Saca de la pila la tabla de símbolos al salir de un contexto
 void popAmbito() {
-    if (topePila < 0) return;
+    if (topePila < 0 || !mostrarTablas) return;
     
     imprimirTablaActual(); // Desplegar antes de destruir
     
@@ -529,23 +596,6 @@ RegistroSemantico* buscarSimbolo(char *lexema) {
     return NULL;
 }
 
-// Imprime la tabla actual por consola al cerrar un contexto
-void imprimirTablaActual2() {
-    if (topePila < 0) {
-        return;
-    }
-
-    FILE *f_salida = (salidaTablas != NULL) ? salidaTablas : stdout;
-
-    fprintf("--- Tabla de Simbolos (Ambito Nivel %d) ---\n", topePila);
-    RegistroSemantico *actual = pilaTablas[topePila].raiz;
-    while (actual != NULL) {
-        printf("Nombre: %s | Tipo: %s | Categoria: %d | Nivel: %d\n", 
-               actual->lexema, actual->tipoDato, actual->categoria, actual->nivelAmbito);
-        actual = actual->siguiente;
-    }
-    printf("-------------------------------------------\n");
-}
 
 // Imprime la tabla actual al cerrar un contexto
 void imprimirTablaActual() {
@@ -555,39 +605,67 @@ void imprimirTablaActual() {
 
     FILE *f_salida = (salidaTablas != NULL) ? salidaTablas : stdout;
 
-    fprintf(f_salida, "==================================================\n");
-    fprintf(f_salida, "--- Tabla de Simbolos (Ambito Nivel %d) ---\n", topePila);
+    fprintf(f_salida, "+-------------------------------------------------------------------+\n");
+    fprintf(f_salida, "| TABLA DE SIMBOLOS - AMBITO NIVEL %-32d |\n", topePila);
 
-    // 1. Desplegar metadatos de la función si el ámbito actual pertenece a una
+    // 1. Metadatos de función o contexto activo
     if (pilaTablas[topePila].nombreFuncion != NULL) {
-        fprintf(f_salida, "Funcion   : %s\n", pilaTablas[topePila].nombreFuncion);
-        fprintf(f_salida, "Parametros: %s\n", 
+        fprintf(f_salida, "+-------------------------------------------------------------------+\n");
+        fprintf(f_salida, "| Funcion   : %-53s |\n", pilaTablas[topePila].nombreFuncion);
+        fprintf(f_salida, "| Parametros: %-53s |\n", 
                 (pilaTablas[topePila].parametrosFuncion && strlen(pilaTablas[topePila].parametrosFuncion) > 0) 
                 ? pilaTablas[topePila].parametrosFuncion 
                 : "ninguno");
     } 
-    // Si es un ámbito interno (for/while/if) dentro de una función activa
     else if (strlen(funcionActual) > 0) {
-        fprintf(f_salida, "Contexto de Funcion: %s\n", funcionActual);
+        fprintf(f_salida, "+-------------------------------------------------------------------+\n");
+        fprintf(f_salida, "| Contexto  : dentro de %-43s |\n", funcionActual);
     }
-    
-    fprintf(f_salida, "--------------------------------------------------\n");
 
-    // 2. Desplegar los símbolos contenidos en la tabla
+    // 2. Recolectar los símbolos visibles para invertir el orden LIFO a cronológico
+    RegistroSemantico *visibles[512];
+    int totalVisibles = 0;
     RegistroSemantico *actual = pilaTablas[topePila].raiz;
-    if (actual == NULL) {
-        fprintf(f_salida, "(Tabla vacia)\n");
-    } else {
-        while (actual != NULL) {
-            fprintf(f_salida, "Nombre: %-15s | Tipo: %-12s | Categoria: %d | Nivel: %d\n", 
-                    actual->lexema, 
-                    actual->tipoDato ? actual->tipoDato : "desconocido", 
-                    actual->categoria, 
-                    actual->nivelAmbito);
+
+    while (actual != NULL && totalVisibles < 512) {
+        // Filtrar símbolos fantasma de recuperación de errores
+        if (actual->tipoDato && strcmp(actual->tipoDato, "int_undeclared") == 0) {
             actual = actual->siguiente;
+            continue;
+        }
+        // En el ámbito global (Nivel 0), mostrar únicamente variables
+        if (topePila == 0 && actual->categoria == tipoFuncion) {
+            actual = actual->siguiente;
+            continue;
+        }
+
+        visibles[totalVisibles++] = actual;
+        actual = actual->siguiente;
+    }
+
+    // 3. Imprimir tabla en formato de caja
+    fprintf(f_salida, "+--------------------+----------------+---------------+-------------+\n");
+    fprintf(f_salida, "| %-18s | %-14s | %-13s | %-11s |\n", "Nombre", "Tipo", "Categoria", "Ambito");
+    fprintf(f_salida, "+--------------------+----------------+---------------+-------------+\n");
+
+    if (totalVisibles == 0) {
+        fprintf(f_salida, "| %-65s |\n", "(Tabla vacia)");
+    } else {
+        // Recorrer de atrás hacia adelante para respetar el orden de declaración
+        for (int i = totalVisibles - 1; i >= 0; i--) {
+            RegistroSemantico *sim = visibles[i];
+            char nivelStr[16];
+            snprintf(nivelStr, sizeof(nivelStr), "Nivel %d", sim->nivelAmbito);
+
+            fprintf(f_salida, "| %-18s | %-14s | %-13s | %-11s |\n",
+                    sim->lexema,
+                    sim->tipoDato ? sim->tipoDato : "desconocido",
+                    obtenerNombreCategoria(sim->categoria),
+                    nivelStr);
         }
     }
-    fprintf(f_salida, "==================================================\n\n");
+
+    fprintf(f_salida, "+--------------------+----------------+---------------+-------------+\n\n");
 }
 
 void reportarRedeclaracion(const char *archivo, const char *lexema, const char *tipoDato,
@@ -768,36 +846,68 @@ void obtenerTextoTipo(struct ASTNodo *nodo, char *buffer, size_t tam) {
         return;
     }
 
-    // Si es un struct o tipo con estructura anidada (izq = nombre/modificador, valorLexema = etiqueta)
-    if (nodo->valorLexema && strcmp(nodo->valorLexema, "struct") == 0) {
-        if (nodo->izq && nodo->izq->valorLexema) {
+    const char *tag = nodo->valorLexema;
+
+    // Structs y Unions
+    if (tag && (strcmp(tag, "struct") == 0 || strcmp(tag, "def-struct") == 0)) {
+        if (nodo->izq && nodo->izq->valorLexema)
             snprintf(buffer, tam, "struct %s", nodo->izq->valorLexema);
-        } else {
+        else
             snprintf(buffer, tam, "struct");
-        }
+        return;
+    }
+    if (tag && strcmp(tag, "def-struct-anon") == 0) {
+        snprintf(buffer, tam, "struct");
+        return;
+    }
+    if (tag && (strcmp(tag, "union") == 0 || strcmp(tag, "def-union") == 0)) {
+        if (nodo->izq && nodo->izq->valorLexema)
+            snprintf(buffer, tam, "union %s", nodo->izq->valorLexema);
+        else
+            snprintf(buffer, tam, "union");
+        return;
+    }
+    if (tag && strcmp(tag, "def-union-anon") == 0) {
+        snprintf(buffer, tam, "union");
         return;
     }
 
-    if (nodo->valorLexema && strcmp(nodo->valorLexema, "enum") == 0) {
-        if (nodo->izq && nodo->izq->valorLexema) {
+    // Enums
+    if (tag && (strcmp(tag, "enum") == 0 || strcmp(tag, "def-enum") == 0)) {
+        if (nodo->izq && nodo->izq->valorLexema)
             snprintf(buffer, tam, "enum %s", nodo->izq->valorLexema);
-        } else {
+        else
             snprintf(buffer, tam, "enum");
-        }
+        return;
+    }
+    if (tag && strcmp(tag, "def-enum-anon") == 0) {
+        snprintf(buffer, tam, "enum");
         return;
     }
 
-    // Si tiene un hijo izquierdo (modificadores) y un valor propio (tipo base)
-    if (nodo->izq && nodo->valorLexema) {
+    // Nodos compuestos con modificador en izq y tipo real en der
+    if (tag && (strcmp(tag, "mod-struct") == 0 || strcmp(tag, "mod-union") == 0 ||
+                strcmp(tag, "mod-enum") == 0   || strcmp(tag, "mod-tipo") == 0)) {
+        char bufMod[128] = "";
+        char bufTipo[128] = "";
+        if (nodo->izq) obtenerTextoTipo(nodo->izq, bufMod, sizeof(bufMod));
+        if (nodo->der) obtenerTextoTipo(nodo->der, bufTipo, sizeof(bufTipo));
+        snprintf(buffer, tam, "%s %s", bufMod, bufTipo);
+        return;
+    }
+
+    // Modificadores encadenados sobre tipo base
+    if (nodo->izq && tag) {
         char bufIzq[128];
         obtenerTextoTipo(nodo->izq, bufIzq, sizeof(bufIzq));
-        snprintf(buffer, tam, "%s %s", bufIzq, nodo->valorLexema);
-    } 
-    // Si solo tiene valor
-    else if (nodo->valorLexema) {
-        snprintf(buffer, tam, "%s", nodo->valorLexema);
-    } 
-    else {
+        snprintf(buffer, tam, "%s %s", bufIzq, tag);
+        return;
+    }
+
+    // Nodo hoja simple
+    if (tag) {
+        snprintf(buffer, tam, "%s", tag);
+    } else {
         snprintf(buffer, tam, "tipo");
     }
 }
@@ -821,30 +931,96 @@ void reportarUsoNoDeclarado(const char *archivo, const char *lexema, int lineaEr
 
 // Función auxiliar para validar expresiones
 void validarUsoSimbolo(const char *lexema, int lineaAct, int columnaAct) {
-    // Buscar en toda la pila activa de ámbitos
-    RegistroSemantico *encontrado = buscarSimbolo(lexema);
-    
-    if (encontrado == NULL) {
-        int lenActual = strlen(lexema);
-        reportarUsoNoDeclarado(archivoFuente, lexema, lineaAct, columnaAct, lenActual);
-        
-        int nivelFuncion = (topePila >= 1) ? 1 : topePila;
+    if (esConstanteEstandar(lexema)) {
+        return;
+    }
 
-        // Insertar un símbolo fantasma en el ámbito de la función
-        RegistroSemantico *nuevo = (RegistroSemantico*)malloc(sizeof(RegistroSemantico));
+    RegistroSemantico *encontrado = buscarSimbolo((char *)lexema);
+    if (encontrado == NULL) {
+        int lenActual = (int)strlen(lexema);
+        reportarUsoNoDeclarado(archivoFuente, lexema, lineaAct, columnaAct, lenActual);
+
+        int nivelFuncion = (topePila >= 1) ? 1 : topePila;
+        RegistroSemantico *nuevo = (RegistroSemantico *)malloc(sizeof(RegistroSemantico));
         nuevo->lexema = strdup(lexema);
         nuevo->tipoDato = strdup("int_undeclared");
         nuevo->categoria = tipoVariable;
         nuevo->nivelAmbito = nivelFuncion;
         nuevo->lineaDeclaracion = lineaAct;
-        nuevo->columnaDeclaracion = columnaAct;  
+        nuevo->columnaDeclaracion = columnaAct;
         nuevo->esPrototipo = 0;
         nuevo->siguiente = pilaTablas[nivelFuncion].raiz;
         pilaTablas[nivelFuncion].raiz = nuevo;
     }
 }
 
-// Convierte recursivamente el árbol sintáctico de parámetros en una cadena de texto (ej. "int a, const char *b")
+// Verifica si la función pertenece a la biblioteca estándar de C
+int esFuncionEstandar(const char *lexema) {
+    const char *funcs[] = {
+        // <stdio.h>
+        "printf", "fprintf", "sprintf", "snprintf", "scanf", "fscanf", "sscanf",
+        "fopen", "fclose", "fread", "fwrite", "fgets", "fputs", "fgetc", "fputc",
+        "getchar", "putchar", "puts", "perror", "fflush", "fseek", "ftell", "rewind",
+        // <stdlib.h>
+        "malloc", "calloc", "realloc", "free", "exit", "abort", "atoi", "atof", "atol",
+        "strtol", "strtod", "rand", "srand", "qsort", "bsearch", "system", "getenv",
+        // <string.h>
+        "strlen", "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp",
+        "strchr", "strrchr", "strstr", "strtok", "memcpy", "memmove", "memset", "memcmp",
+        // <ctype.h> / <math.h>
+        "isalpha", "isdigit", "isalnum", "isspace", "toupper", "tolower",
+        "sqrt", "pow", "sin", "cos", "tan", "abs", "fabs", "ceil", "floor",
+        NULL
+    };
+    for (int i = 0; funcs[i] != NULL; i++) {
+        if (strcmp(lexema, funcs[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Verifica constantes y flujos globales estándar
+int esConstanteEstandar(const char *lexema) {
+    const char *constantes[] = {
+        "NULL", "EOF", "EXIT_SUCCESS", "EXIT_FAILURE",
+        "true", "false", "stdin", "stdout", "stderr", NULL
+    };
+    for (int i = 0; constantes[i] != NULL; i++) {
+        if (strcmp(lexema, constantes[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Valida llamadas a funciones: ignora las estándar y valida las declaradas por el usuario
+void validarLlamadaFuncion(const char *lexema, int lineaAct, int columnaAct) {
+    if (esFuncionEstandar(lexema)) {
+        return; // Válida, pero nunca entra a la tabla de símbolos
+    }
+
+    // Buscar si existe como función o prototipo en la pila (Nivel 0)
+    RegistroSemantico *encontrado = buscarSimbolo((char *)lexema);
+    if (encontrado == NULL) {
+        int lenActual = (int)strlen(lexema);
+        reportarUsoNoDeclarado(archivoFuente, lexema, lineaAct, columnaAct, lenActual);
+
+        // Insertar fantasma en el ámbito local de la función actual para evitar errores repetidos
+        int nivelFuncion = (topePila >= 1) ? 1 : topePila;
+        RegistroSemantico *nuevo = (RegistroSemantico *)malloc(sizeof(RegistroSemantico));
+        nuevo->lexema = strdup(lexema);
+        nuevo->tipoDato = strdup("int_undeclared");
+        nuevo->categoria = tipoFuncion;
+        nuevo->nivelAmbito = nivelFuncion;
+        nuevo->lineaDeclaracion = lineaAct;
+        nuevo->columnaDeclaracion = columnaAct;
+        nuevo->esPrototipo = 0;
+        nuevo->siguiente = pilaTablas[nivelFuncion].raiz;
+        pilaTablas[nivelFuncion].raiz = nuevo;
+    }
+}
+
 void obtenerTextoParametrosAux(struct ASTNodo *nodo, char *buffer, size_t tam) {
     if (!nodo) return;
 
@@ -859,19 +1035,67 @@ void obtenerTextoParametrosAux(struct ASTNodo *nodo, char *buffer, size_t tam) {
     else {
         // Es un parámetro individual
         char tempTipo[128] = "";
+        char tempParam[256] = "";
 
         // Si tiene especificadores de tipo (nodo->izq)
         if (nodo->izq) {
             obtenerTextoTipo(nodo->izq, tempTipo, sizeof(tempTipo));
         }
 
-        // Construir "tipo nombre" o "tipo" si es anónimo
-        char tempParam[256] = "";
-        if (strlen(tempTipo) > 0 && nodo->valorLexema && strcmp(nodo->valorLexema, "parametro-tipo") != 0) {
+        // Parámetro puntero con nombre (1 o más '*', con o sin []) 
+        if (nodo->valorLexema && strcmp(nodo->valorLexema, "parametro-puntero") == 0 && nodo->der) {
+            struct ASTNodo *nodoPtrs = nodo->der;
+            int esArray = 0;
+
+            // Si tiene dimensiones (parametro-array), bajar un nivel hacia "param-punteros"
+            if (nodoPtrs->valorLexema && strcmp(nodoPtrs->valorLexema, "parametro-array") == 0) {
+                esArray = 1;
+                nodoPtrs = nodoPtrs->izq;
+            }
+
+            int numPtrs = 1;
+            const char *nombreReal = "";
+
+            if (nodoPtrs && nodoPtrs->valorLexema && strcmp(nodoPtrs->valorLexema, "param-punteros") == 0) {
+                numPtrs = contarPunteros(nodoPtrs->izq);
+                if (nodoPtrs->der && nodoPtrs->der->valorLexema) {
+                    nombreReal = nodoPtrs->der->valorLexema;
+                }
+            }
+
+            char asteriscos[32] = "";
+            for (int i = 0; i < numPtrs && i < 31; i++) {
+                asteriscos[i] = '*';
+            }
+            asteriscos[numPtrs < 31 ? numPtrs : 31] = '\0';
+
+            snprintf(tempParam, sizeof(tempParam), "%s %s%s%s",
+                     tempTipo, asteriscos, nombreReal, esArray ? "[]" : "");
+        }
+        // Parámetro puntero anónimo (1 o más '*')
+        else if (nodo->valorLexema && strcmp(nodo->valorLexema, "parametro-puntero-anon") == 0) {
+            int numPtrs = contarPunteros(nodo->der);
+            char asteriscos[32] = "";
+            for (int i = 0; i < numPtrs && i < 31; i++) {
+                asteriscos[i] = '*';
+            }
+            asteriscos[numPtrs < 31 ? numPtrs : 31] = '\0';
+
+            snprintf(tempParam, sizeof(tempParam), "%s %s", tempTipo, asteriscos);
+        }
+        // Caso parámetro arreglo sin puntero
+        else if (nodo->valorLexema && strcmp(nodo->valorLexema, "parametro") == 0 && nodo->der && nodo->der->izq) {
+            snprintf(tempParam, sizeof(tempParam), "%s %s[]", tempTipo, nodo->der->izq->valorLexema);
+        }
+        // Caso parámetro simple con nombre
+        else if (strlen(tempTipo) > 0 && nodo->valorLexema && strcmp(nodo->valorLexema, "parametro-tipo") != 0) {
             snprintf(tempParam, sizeof(tempParam), "%s %s", tempTipo, nodo->valorLexema);
-        } else if (strlen(tempTipo) > 0) {
+        }
+        // Caso parámetro anónimo simple
+        else if (strlen(tempTipo) > 0) {
             snprintf(tempParam, sizeof(tempParam), "%s", tempTipo);
-        } else if (nodo->valorLexema) {
+        }
+        else if (nodo->valorLexema) {
             snprintf(tempParam, sizeof(tempParam), "%s", nodo->valorLexema);
         }
 
@@ -905,10 +1129,22 @@ void registrarParametrosEnTabla(struct ASTNodo *nodo) {
         obtenerTextoTipo(nodo->izq, tipoParam, sizeof(tipoParam));
     }
 
-    // Agrega sufijos de puntero/arreglo si existen en nodo->der
-    if (nodo->valorLexema && strcmp(nodo->valorLexema, "parametro-puntero") == 0) {
-        strncat(tipoParam, " *", sizeof(tipoParam) - strlen(tipoParam) - 1);
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "parametro-puntero") == 0 && nodo->der) {
+        struct ASTNodo *nodoPtrs = nodo->der;
+        if (nodoPtrs->valorLexema && strcmp(nodoPtrs->valorLexema, "parametro-array") == 0) {
+            nodoPtrs = nodoPtrs->izq;
+        }
+        int numPtrs = (nodoPtrs && nodoPtrs->valorLexema && strcmp(nodoPtrs->valorLexema, "param-punteros") == 0)
+                      ? contarPunteros(nodoPtrs->izq)
+                      : 1;
+        if (numPtrs > 0) {
+            strncat(tipoParam, " ", sizeof(tipoParam) - strlen(tipoParam) - 1);
+            for (int i = 0; i < numPtrs; i++) {
+                strncat(tipoParam, "*", sizeof(tipoParam) - strlen(tipoParam) - 1);
+            }
+        }
     }
+
     if (nodo->der && nodo->der->valorLexema && strcmp(nodo->der->valorLexema, "parametro-array") == 0) {
         strncat(tipoParam, "[]", sizeof(tipoParam) - strlen(tipoParam) - 1);
     }
@@ -939,6 +1175,11 @@ struct ASTNodo* extraerNodoIdParametro(struct ASTNodo *nodo) {
     // Caso 2: Parámetro compuesto
     struct ASTNodo *actual = nodo->der;
     while (actual != NULL) {
+        // <-- AGREGAR ESTE BLOQUE:
+        if (actual->valorLexema && strcmp(actual->valorLexema, "param-punteros") == 0) {
+            return actual->der;
+        }
+
         if (actual->valorLexema &&
             strcmp(actual->valorLexema, "parametro-array") != 0 &&
             strcmp(actual->valorLexema, "unario:*") != 0 &&
@@ -965,38 +1206,76 @@ RegistroSemantico* buscarEnAmbitoActual(const char *lexema) {
     return NULL;
 }
 
-// Pre-registra funciones y constantes comunes de <stdio.h>, <stdlib.h>, <string.h>, etc. en Nivel 0
-void registrarSimbolosEstandar() {
-    // 1. Funciones estándar (Categoria: tipoFuncion)
-    const char *funcionesStd[] = {
-        // <stdio.h>
-        "printf", "fprintf", "sprintf", "snprintf", "scanf", "fscanf", "sscanf",
-        "fopen", "fclose", "fread", "fwrite", "fgets", "fputs", "fgetc", "fputc",
-        "getchar", "putchar", "puts", "perror", "fflush", "fseek", "ftell", "rewind",
-        // <stdlib.h>
-        "malloc", "calloc", "realloc", "free", "exit", "abort", "atoi", "atof", "atol",
-        "strtol", "strtod", "rand", "srand", "qsort", "bsearch", "system", "getenv",
-        // <string.h>
-        "strlen", "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp",
-        "strchr", "strrchr", "strstr", "strtok", "memcpy", "memmove", "memset", "memcmp",
-        // <ctype.h> / <math.h>
-        "isalpha", "isdigit", "isalnum", "isspace", "toupper", "tolower",
-        "sqrt", "pow", "sin", "cos", "tan", "abs", "fabs", "ceil", "floor",
-        NULL
-    };
-
-    for (int i = 0; funcionesStd[i] != NULL; i++) {
-        insertarSimbolo((char*)funcionesStd[i], "extern", tipoFuncion, 0, 0);
+// Construye el string con el puntero ("int" -> "int *")
+char* crearTipoPuntero(const char *tipoBase) {
+    char *res = malloc(strlen(tipoBase) + 3);
+    if (res) {
+        sprintf(res, "%s *", tipoBase);
     }
+    return res;
+}
 
-    // 2. Constantes, macros estándar y flujos globales (Categoria: tipoVariable)
-    insertarSimbolo("NULL", "void *", tipoVariable, 0, 0);
-    insertarSimbolo("EOF", "int", tipoVariable, 0, 0);
-    insertarSimbolo("EXIT_SUCCESS", "int", tipoVariable, 0, 0);
-    insertarSimbolo("EXIT_FAILURE", "int", tipoVariable, 0, 0);
-    insertarSimbolo("true", "bool", tipoVariable, 0, 0);
-    insertarSimbolo("false", "bool", tipoVariable, 0, 0);
-    insertarSimbolo("stdin", "FILE *", tipoVariable, 0, 0);
-    insertarSimbolo("stdout", "FILE *", tipoVariable, 0, 0);
-    insertarSimbolo("stderr", "FILE *", tipoVariable, 0, 0);
+// Añade un " *" al último símbolo registrado en el ámbito actual
+void agregarPunteroAUltimoSimbolo() {
+    if (topePila < 0 || pilaTablas[topePila].raiz == NULL) return;
+    RegistroSemantico *ultimo = pilaTablas[topePila].raiz;
+    char *nuevoTipo = crearTipoPuntero(ultimo->tipoDato);
+    if (nuevoTipo) {
+        free(ultimo->tipoDato);
+        ultimo->tipoDato = nuevoTipo;
+    }
+}
+
+// Construye "int[5]" o "int[3][4]" a partir de tipoActual y el nodo listaDimensiones
+void formatearTipoConDimensiones(const char *tipoBase, struct ASTNodo *dims, char *salida, size_t tam) {
+    snprintf(salida, tam, "%s", tipoBase);
+    if (!dims) return;
+
+    if (dims->valorLexema && strcmp(dims->valorLexema, "lista-dimensiones") == 0) {
+        formatearTipoConDimensiones(tipoBase, dims->izq, salida, tam);
+        char dimActual[32] = "";
+        formatearTipoConDimensiones("", dims->der, dimActual, sizeof(dimActual));
+        strncat(salida, dimActual, tam - strlen(salida) - 1);
+    } else if (dims->valorLexema && strcmp(dims->valorLexema, "dimension") == 0) {
+        if (dims->der && dims->der->valorLexema) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "[%s]", dims->der->valorLexema);
+            strncat(salida, buf, tam - strlen(salida) - 1);
+        } else {
+            strncat(salida, "[]", tam - strlen(salida) - 1);
+        }
+    }
+}
+
+// Convierte el enum CategoriaSimbolo a texto legible
+const char* obtenerNombreCategoria(CategoriaSimbolo cat) {
+    switch (cat) {
+        case tipoVariable:  return "Variable";
+        case tipoFuncion:   return "Funcion";
+        case tipoParametro: return "Parametro";
+        default:            return "Desconocido";
+    }
+}
+
+int esInclusionCircular(const char *nombreArchivo) {
+    for (int i = 0; i < profundidadInclude; i++) {
+        if (strcmp(archivosEnProceso[i], nombreArchivo) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void limpiarTemporalAlSalir() {
+    remove("archivoTemp.tmp");
+}
+
+// Helper interno: cuenta cuántos nodos '*' hay en el subárbol 'punteros'
+int contarPunteros(struct ASTNodo *nodo) {
+    int count = 0;
+    while (nodo != NULL && nodo->valorLexema && strcmp(nodo->valorLexema, "*") == 0) {
+        count++;
+        nodo = nodo->izq;
+    }
+    return count;
 }
