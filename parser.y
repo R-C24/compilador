@@ -13,6 +13,8 @@ extern FILE *yyin;
 extern int yyleng;
 extern const char *archivoFuente;
 
+int offsetFuncionActual = 0;
+
 void yyerror(const char *s);
 struct ASTNodo *crearNodoUnario(const char *op, struct ASTNodo *operando);
 

@@ -81,6 +81,8 @@ struct ASTNodo {
     double valorNumerico;
     int lineaAct;
     int columnaAct;
+    RegistroSemantico *simbolo;
+    int bytesLocales;
 };
 
 int esTipoUsuario(char *s);
@@ -110,6 +112,7 @@ struct RegistroSemantico {
     int lineaDeclaracion;
     int columnaDeclaracion;
     int esPrototipo;
+    int offset;
     struct RegistroSemantico *siguiente;
 };
 
@@ -161,5 +164,57 @@ int esConstanteEstandar(const char *lexema);
 void validarLlamadaFuncion(const char *lexema, int lineaAct, int columnaAct);
 void formatearTipoConDimensiones(const char *tipoBase, struct ASTNodo *dims, char *salida, size_t tam);
 int contarPunteros(struct ASTNodo *nodo);
+
+// ------------- Generación de código -------------
+
+extern int contadorTemporales;
+extern int contadorEtiquetas;
+extern int offsetPilaActual;
+
+extern int offsetFuncionActual;
+
+extern FILE *archivoASM;
+extern int errorGeneracion;
+
+typedef enum {
+    IdExpr,
+    LiteralExpr,
+    TempExpr
+} ExprKind;
+
+typedef struct {
+    ExprKind kind;
+    char nombre[64];
+    char direccion[64];
+    int valor;
+} ExprRec;
+
+typedef struct {
+    char operador[16]; 
+} OpRec;
+
+int generarCodigo(struct ASTNodo *raiz, const char *rutaSalidaS);
+void start(void);
+void finish(struct ASTNodo *raiz);
+void generate(const char *opcode, const char *arg1, const char *arg2, const char *res);
+
+ExprRec genInfix(ExprRec e1, OpRec op, ExprRec e2);
+void assignX86(const char *objDir, ExprRec fuente);
+ExprRec processId(const char *lexema);
+ExprRec processLiteral(int valor);
+void readId(ExprRec inVar);
+void writeExpr(ExprRec outExpr);
+
+void recorrerNodo(struct ASTNodo *nodo);
+ExprRec evaluarExpresion(struct ASTNodo *nodo);
+
+void obtenerOperando(ExprRec e, char *dest, size_t tam);
+ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2);
+ExprRec evaluarExpresion(struct ASTNodo *nodo);
+void procesarDeclaracion(struct ASTNodo *nodo);
+void recorrerNodo(struct ASTNodo *nodo);
+
+void liberarSimbolos();
+int calcularEspacioPila(struct ASTNodo *nodoFuncion);
 
 #endif //COMPILADOR_H

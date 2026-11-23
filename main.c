@@ -38,37 +38,43 @@ extern void yyrestart(FILE *new_file);
 extern struct ASTNodo *raizAST;
 extern int yyparse();
 
-int mostrarTablas;
+int contadorTemporales = 0;
+int contadorEtiquetas = 0;
+int offsetPilaActual = 0;
+
+FILE *archivoASM = NULL;
+int errorGeneracion = 0;
+
+RegistroSemantico *historicoSimbolos[4096];
+int totalHistoricoSimbolos = 0;
 
 const char *archivoFuente = NULL;
 
 int main(int argc, char *argv[]) {
-    atexit(limpiarTemporalAlSalir);
 
     int opt;
     int activarPreproceso = 0; // El preproceso está desactivado por defecto.
-    char *archivoTablas = NULL;
-    mostrarTablas = 1;
+    int ejecutarBinario = 0;
+    char *archivoEnsamblador = NULL;
 
-    while ((opt = getopt(argc, argv, "pso:")) != -1) {
+    while ((opt = getopt(argc, argv, "pS:e")) != -1) {
         switch (opt) {
             case 'p':
                 activarPreproceso = 1;
                 break;
-            case 's':
-                mostrarTablas = 1;
+            case 'S':
+                archivoEnsamblador = optarg;
                 break;
-            case 'o':
-                archivoTablas = optarg;
+            case 'e':
+                ejecutarBinario = 1;
                 break;
             default:
                 fprintf(stderr, "\nError: no es una opción válida.\n");
-                fprintf(stderr, "Uso correcto: %s [-p] [-s] [-o <archivo>] <archivo.c>\n\n", argv[0]);
-                fprintf(stderr, "Opciones disponibles:\n");
-                fprintf(stderr, "  -p    Activa el preprocesador opcional.\n");
-                fprintf(stderr, "  -s    Despliega cada tabla de símbolos al cerrar contexto.\n");
-                fprintf(stderr, "  -o <archivo>  Redirige la salida de las tablas hacia <archivo>.\n\n");
-
+                fprintf(stderr, "Uso: %s [-p] [-S archivo.s] [-e] <archivo.c>\n", argv[0]);
+                fprintf(stderr, "Opciones:\n");
+                fprintf(stderr, "  -p            Activa el preprocesador (desactivado por defecto).\n");
+                fprintf(stderr, "  -S <archivo>  Escribe el ensamblador en el archivo indicado.\n");
+                fprintf(stderr, "  -e            Ensambla con gcc y ejecuta el código generado.\n");
                 return EXIT_FAILURE;
         }
     }
@@ -78,12 +84,12 @@ int main(int argc, char *argv[]) {
     } else {
         fprintf(stderr, "Error: Falta el archivo fuente .c de entrada.\n");
 
-        fprintf(stderr, "Uso correcto: %s [-p] [-s] [-o <archivo>] <archivo.c>\n\n", argv[0]);
-        fprintf(stderr, "Opciones disponibles:\n");
-        fprintf(stderr, "  -p    Activa el preprocesador opcional.\n");
-        fprintf(stderr, "  -s    Despliega cada tabla de símbolos al cerrar contexto.\n");
-        fprintf(stderr, "  -o <archivo>  Redirige la salida de las tablas hacia <archivo>.\n\n");
-
+        fprintf(stderr, "Uso: %s [-p] [-S archivo.s] [-e] <archivo.c>\n", argv[0]);
+        fprintf(stderr, "Opciones:\n");
+        fprintf(stderr, "  -p            Activa el preprocesador (desactivado por defecto).\n");
+        fprintf(stderr, "  -S <archivo>  Escribe el ensamblador en el archivo indicado.\n");
+        fprintf(stderr, "  -e            Ensambla con gcc y ejecuta el código generado.\n");
+        
         return EXIT_FAILURE;
     }
 
@@ -92,18 +98,17 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    if (mostrarTablas && archivoTablas != NULL) {
-        salidaTablas = fopen(archivoTablas, "w");
-        if (!salidaTablas) {
-            perror("Error al abrir el archivo de salida de tablas");
-            return EXIT_FAILURE;
-        }
+    // Determinar nombre del .s (por defecto <fuente>.s)
+    char rutaSalidaS[512];
+    if (archivoEnsamblador != NULL) {
+        strncpy(rutaSalidaS, archivoEnsamblador, sizeof(rutaSalidaS) - 1);
+        rutaSalidaS[sizeof(rutaSalidaS) - 1] = '\0';
     } else {
-        salidaTablas = stdout;
+        obtenerNombreSalidaS(archivoFuente, rutaSalidaS, sizeof(rutaSalidaS));
     }
 
     const char *archivoTemporal = "archivoTemp.tmp";
-    const char *archivoParaEscanear = NULL;
+    const char *archivoParaEscanear = archivoFuente;
 
     if (activarPreproceso) {
         printf("Ejecutando Preprocesador...\n");
@@ -111,7 +116,6 @@ int main(int argc, char *argv[]) {
         FILE *f_temp = fopen(archivoTemporal, "w");
         if (!f_temp) {
             perror("Error al crear el archivo temporal");
-            if (salidaTablas != stdout) fclose(salidaTablas);
             exit(EXIT_FAILURE);
         }
 
@@ -121,7 +125,6 @@ int main(int argc, char *argv[]) {
 
     } else {
         printf("Preprocesador desactivado.\n");
-        archivoParaEscanear = archivoFuente;
     }
 
     printf("Pasando archivo procesado al Scanner (Flex)...\n");
@@ -133,27 +136,45 @@ int main(int argc, char *argv[]) {
 
     printf("Iniciando análisis y construcción de tabla de símbolos...\n");
     inicializarPila();
-    yyparse();
+    int resultadoParse = yyparse();
 
-    if (salidaTablas == stdout) {
-        printf("\n--- Cierre del Contexto Global ---\n");
-    }
     popAmbito();
 
     fclose(yyin);
     if (activarPreproceso) {
         remove(archivoTemporal);
     }
-    if (salidaTablas != NULL && salidaTablas != stdout) {
-        fclose(salidaTablas);
-    }
 
-    if (totalErrores > 0) {
-        fprintf(stderr, "\nCompilación fallida: se encontraron %d error(es).\n", totalErrores);
+    if (resultadoParse != 0 || totalErrores > 0 || raizAST == NULL) {
+        fprintf(stderr, "\nCompilación fallida: se encontraron %d error(es). No se generó código.\n", totalErrores);
         return EXIT_FAILURE;
     }
 
-    printf("Compilación exitosa sin errores.\n");
+    if (!generarCodigo(raizAST, rutaSalidaS)) {
+        fprintf(stderr, "\nError durante la generación de código. El archivo '%s' fue eliminado.\n", rutaSalidaS);
+        return EXIT_FAILURE;
+    }
+    liberarSimbolos();
+
+    printf("Código ensamblador x86 generado en: %s\n", rutaSalidaS);
+
+    printf("Código ensamblador x86 generado en: %s\n", rutaSalidaS);
+
+    // Bandera -e: Ensamblar con gcc y ejecutar
+    if (ejecutarBinario) {
+        char comando[1024];
+        const char *binarioSalida = "./salida_compilador";
+
+        snprintf(comando, sizeof(comando), "gcc -no-pie %s -o %s", rutaSalidaS, binarioSalida);
+        if (system(comando) != 0) {
+            fprintf(stderr, "Error: gcc falló al ensamblar '%s'.\n", rutaSalidaS);
+            return EXIT_FAILURE;
+        }
+
+        int estado = system(binarioSalida);
+        printf("\nPrograma ejecutado (código de retorno: %d)\n", WEXITSTATUS(estado));
+    }
+    
     return EXIT_SUCCESS;
 
 }
@@ -506,6 +527,8 @@ void inicializarPila() {
 
 // Agrega a la pila una nueva tabla de símbolos al entrar a un nuevo contexto
 void pushAmbitoConContexto(const char *funcion, const char *parametros) {
+    offsetFuncionActual = 0;
+
     if (topePila >= MaxAmbitos - 1) {
         fprintf(stderr, "Error: Desbordamiento de pila de ámbitos.\n");
         return;
@@ -523,19 +546,10 @@ void pushAmbito() {
 
 // Saca de la pila la tabla de símbolos al salir de un contexto
 void popAmbito() {
-    if (topePila < 0 || !mostrarTablas) return;
-    
-    imprimirTablaActual(); // Desplegar antes de destruir
-    
+    if (topePila < 0) return;
+        
     // Liberar memoria de los registros del ámbito que se cierra
-    RegistroSemantico *actual = pilaTablas[topePila].raiz;
-    while (actual != NULL) {
-        RegistroSemantico *temp = actual;
-        actual = actual->siguiente;
-        free(temp->lexema);
-        free(temp->tipoDato);
-        free(temp);
-    }
+    
     pilaTablas[topePila].raiz = NULL;
 
     if (pilaTablas[topePila].nombreFuncion) {
@@ -573,6 +587,19 @@ RegistroSemantico* insertarSimbolo(char *lexema, char *tipoDato, CategoriaSimbol
     nuevo->lineaDeclaracion = linea;
     nuevo->columnaDeclaracion = columna;
     nuevo->esPrototipo = 0;
+
+    // Asignación automática de offset para variables locales y parámetros
+    if (topePila > 0 && (categoria == tipoVariable || categoria == tipoParametro)) {
+        int tam = (strchr(tipoDato, '*') != NULL) ? 8 : 4;
+        offsetFuncionActual += tam;
+        nuevo->offset = offsetFuncionActual;
+    } else {
+        nuevo->offset = 0;
+    }
+
+    if (totalHistoricoSimbolos < 4096) {
+    historicoSimbolos[totalHistoricoSimbolos++] = nuevo;
+    }
     
     // Insertar al inicio de la lista enlazada del ámbito actual
     nuevo->siguiente = pilaTablas[topePila].raiz;
@@ -763,6 +790,17 @@ struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *de
     nuevo->der = der;
     nuevo->valorLexema = lexema ? strdup(lexema) : NULL;
     nuevo->valorNumerico = 0.0;
+    nuevo->simbolo = NULL;
+    nuevo->bytesLocales = 0;
+
+    if (izq == NULL && der == NULL && lexema != NULL) {
+        nuevo->simbolo = buscarSimbolo(lexema);
+    }
+
+    if (tipo == nodoFuncion) {
+        nuevo->bytesLocales = offsetFuncionActual;
+    }
+
     return nuevo;
 }
 
@@ -1278,4 +1316,480 @@ int contarPunteros(struct ASTNodo *nodo) {
         nodo = nodo->izq;
     }
     return count;
+}
+
+
+// Generación de código
+
+void generate(const char *opcode, const char *arg1, const char *arg2, const char *res) {
+    if (!archivoASM) return;
+
+    if (arg1 && strlen(arg1) > 0 && arg2 && strlen(arg2) > 0 && res && strlen(res) > 0) {
+        fprintf(archivoASM, "    %s %s, %s, %s\n", opcode, arg1, arg2, res);
+    }
+    else if (arg1 && strlen(arg1) > 0 && arg2 && strlen(arg2) > 0) {
+        fprintf(archivoASM, "    %s %s, %s\n", opcode, arg1, arg2);
+    }
+    else if (arg1 && strlen(arg1) > 0) {
+        fprintf(archivoASM, "    %s %s\n", opcode, arg1);
+    }
+    else {
+        fprintf(archivoASM, "    %s\n", opcode);
+    }
+}
+
+void resetTemp(void) {
+    contadorTemporales = 0;
+}
+
+void getTemp(char *dest, size_t tam) {
+    contadorTemporales++;
+    offsetPilaActual += 4;
+    snprintf(dest, tam, "-%d(%%rbp)", offsetPilaActual);
+}
+
+void extractExpr(ExprRec e, char *buffer, size_t tam) {
+    if (e.kind == LiteralExpr) {
+        snprintf(buffer, tam, "$%d", e.valor);
+    } else {
+        strncpy(buffer, e.direccion, tam - 1);
+        buffer[tam - 1] = '\0';
+    }
+}
+
+const char* extractOp(OpRec op) {
+    if (strcmp(op.operador, "+") == 0) return "addl";
+    if (strcmp(op.operador, "-") == 0) return "subl";
+    if (strcmp(op.operador, "*") == 0) return "imull";
+    return "addl";
+}
+
+void generateX86(ExprRec e1, OpRec op, ExprRec e2, ExprRec res) {
+    char arg1[64], arg2[64], resDir[64];
+    extractExpr(e1, arg1, sizeof(arg1));
+    extractExpr(e2, arg2, sizeof(arg2));
+    extractExpr(res, resDir, sizeof(resDir));
+
+    generate("movl", arg1, "%eax", NULL);
+
+    if (strcmp(op.operador, "/") == 0 || strcmp(op.operador, "%") == 0) {
+        generate("cltd", NULL, NULL, NULL);
+        if (e2.kind == LiteralExpr) {
+            generate("movl", arg2, "%ecx", NULL);
+            generate("idivl", "%ecx", NULL, NULL);
+        } else {
+            generate("idivl", arg2, NULL, NULL);
+        }
+        generate("movl", (strcmp(op.operador, "%") == 0) ? "%edx" : "%eax", resDir, NULL);
+        return;
+    }
+
+    const char *opCode = extractOp(op);
+    generate(opCode, arg2, "%eax", NULL);
+    generate("movl", "%eax", resDir, NULL);
+}
+
+ExprRec genInfix(ExprRec e1, OpRec op, ExprRec e2) {
+    ExprRec res;
+    res.kind = TempExpr;
+    res.valor = 0;
+    snprintf(res.nombre, sizeof(res.nombre), "temp_%d", contadorTemporales + 1);
+    getTemp(res.direccion, sizeof(res.direccion));
+
+    generateX86(e1, op, e2, res);
+    return res;
+}
+
+void assignX86(const char *objDir, ExprRec fuente) {
+    char temp[64];
+    extractExpr(fuente, temp, sizeof(temp));
+
+    generate("movl", temp, "%eax", NULL);
+    generate("movl", "%eax", objDir, NULL);
+}
+
+ExprRec processId(const char *lexema) {
+    ExprRec e;
+    e.kind = IdExpr;
+    e.valor = 0;
+
+    RegistroSemantico *info = buscarSimbolo((char *)lexema);
+    if (info != NULL) {
+        strncpy(e.nombre, info->lexema, sizeof(e.nombre) - 1);
+        e.nombre[sizeof(e.nombre) - 1] = '\0';
+
+        if (info->nivelAmbito == 0) {
+            strncpy(e.direccion, info->lexema, sizeof(e.direccion) - 1);
+        } else {
+            snprintf(e.direccion, sizeof(e.direccion), "-%d(%%rbp)", info->offset);
+        }
+    } else {
+        // Si por alguna razón no se encuentra, marcamos la bandera de error
+        fprintf(stderr, "Error en generación: identificador '%s' no resuelto.\n", lexema);
+        errorGeneracion = 1;
+        strncpy(e.nombre, lexema, sizeof(e.nombre) - 1);
+        strncpy(e.direccion, lexema, sizeof(e.direccion) - 1);
+    }
+    return e;
+}
+
+ExprRec processLiteral(int valor) {
+    ExprRec e;
+    e.kind = LiteralExpr;
+    e.nombre[0] = '\0';
+    e.direccion[0] = '\0';
+    e.valor = valor;
+    return e;
+}
+
+void readId(ExprRec inVar) {
+    generate("leaq", inVar.direccion, "%rsi", NULL);
+    generate("leaq", "fmt_in(%rip)", "%rdi", NULL);
+    generate("movl", "$0", "%eax", NULL);
+    generate("call", "scanf", NULL, NULL);
+}
+
+void writeExpr(ExprRec outExpr) {
+    char valStr[64];
+    extractExpr(outExpr, valStr, sizeof(valStr));
+
+    generate("movl", valStr, "%esi", NULL);
+    generate("leaq", "fmt_out(%rip)", "%rdi", NULL);
+    generate("movl", "$0", "%eax", NULL);
+    generate("call", "printf", NULL, NULL);
+}
+
+void start(void) {
+    resetTemp();
+    fprintf(archivoASM, ".section .data\n");
+    fprintf(archivoASM, "    fmt_in:  .string \"%%d\"\n");
+    fprintf(archivoASM, "    fmt_out: .string \"%%d\\n\"\n");
+
+    fprintf(archivoASM, "\n.section .text\n");
+    fprintf(archivoASM, ".globl main\n");
+}
+
+void finish(struct ASTNodo *raiz) {
+    (void)raiz;
+    fprintf(archivoASM, "\n.section .note.GNU-stack,\"\",@progbits\n");
+}
+
+// Punto de entrada con control de errores y borrado automático del .s
+int generarCodigo(struct ASTNodo *raiz, const char *rutaSalidaS) {
+    errorGeneracion = 0;
+
+    archivoASM = fopen(rutaSalidaS, "w");
+    if (!archivoASM) {
+        perror("Error al crear el archivo ensamblador .s");
+        return 0;
+    }
+
+    start();
+    recorrerNodo(raiz);
+    finish(raiz);
+
+    fclose(archivoASM);
+    archivoASM = NULL;
+
+    // Si ocurrió algún error durante la generación, borramos el .s inmediatamente
+    if (errorGeneracion || totalErrores > 0) {
+        remove(rutaSalidaS);
+        return 0;
+    }
+
+    return 1;
+}
+
+// Genera "programa.s" a partir de "programa.c" si no se pasó -S
+void obtenerNombreSalidaS(const char *fuente, char *destino, size_t tam) {
+    strncpy(destino, fuente, tam - 3);
+    destino[tam - 3] = '\0';
+    char *punto = strrchr(destino, '.');
+    if (punto != NULL) {
+        *punto = '\0';
+    }
+    strcat(destino, ".s");
+}
+
+// Helper: obtiene el operando listo para ensamblador
+void obtenerOperando(ExprRec e, char *dest, size_t tam) {
+    if (e.kind == LiteralExpr) {
+        snprintf(dest, tam, "$%d", e.valor);
+    } else {
+        strncpy(dest, e.direccion, tam - 1);
+        dest[tam - 1] = '\0';
+    }
+}
+
+// Helper: evalúa operaciones relacionales (==, !=, <, <=, >, >=) y guarda 0 o 1 en un temporal
+ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2) {
+    char arg1[64], arg2[64];
+    obtenerOperando(e1, arg1, sizeof(arg1));
+    obtenerOperando(e2, arg2, sizeof(arg2));
+
+    ExprRec res;
+    res.kind = TempExpr;
+    res.valor = 0;
+    snprintf(res.nombre, sizeof(res.nombre), "temp_rel");
+    getTemp(res.direccion, sizeof(res.direccion));
+
+    // En sintaxis AT&T: cmpl arg2, arg1 calcula (arg1 - arg2)
+    generate("movl", arg1, "%eax", NULL);
+    generate("cmpl", arg2, "%eax", NULL);
+
+    const char *setInst = "sete";
+    if (strcmp(op, "==") == 0) setInst = "sete";
+    else if (strcmp(op, "!=") == 0) setInst = "setne";
+    else if (strcmp(op, "<") == 0)  setInst = "setl";
+    else if (strcmp(op, "<=") == 0) setInst = "setle";
+    else if (strcmp(op, ">") == 0)  setInst = "setg";
+    else if (strcmp(op, ">=") == 0) setInst = "setge";
+
+    generate(setInst, "%al", NULL, NULL);
+    generate("movzbl", "%al", "%eax", NULL);
+    generate("movl", "%eax", res.direccion, NULL);
+    return res;
+}
+
+// Evalúa recursivamente un nodo de expresión y devuelve dónde quedó el resultado
+ExprRec evaluarExpresion(struct ASTNodo *nodo) {
+    ExprRec vacio = {LiteralExpr, "", "$0", 0};
+    if (!nodo || errorGeneracion) return vacio;
+
+    const char *lex = nodo->valorLexema;
+
+    // 1. Paréntesis: '(' expresion ')' -> nodo->izq
+    if (lex && strcmp(lex, "()") == 0) {
+        return evaluarExpresion(nodo->izq);
+    }
+
+    // 2. Llamada a función (ej. printf / scanf o funciones propias)
+    if (nodo->tipo == nodoLlamadaFuncion && lex) {
+        if (strcmp(lex, "printf") == 0 && nodo->izq) {
+            // Si el argumento es una lista ("arg"), el valor está en nodo->izq->der
+            struct ASTNodo *argVal = (nodo->izq->valorLexema && strcmp(nodo->izq->valorLexema, "arg") == 0)
+                                     ? nodo->izq->der : nodo->izq;
+            ExprRec val = evaluarExpresion(argVal);
+            writeExpr(val);
+            return vacio;
+        }
+        if (strcmp(lex, "scanf") == 0 && nodo->izq) {
+            struct ASTNodo *argVar = (nodo->izq->valorLexema && strcmp(nodo->izq->valorLexema, "arg") == 0)
+                                     ? nodo->izq->der : nodo->izq;
+            // Si pasaron &x ("unario:&"), extraemos x de argVar->izq
+            struct ASTNodo *idNodo = (argVar->valorLexema && strcmp(argVar->valorLexema, "unario:&") == 0)
+                                     ? argVar->izq : argVar;
+            if (idNodo && idNodo->valorLexema) {
+                ExprRec var = processId(idNodo->valorLexema);
+                readId(var);
+            }
+            return vacio;
+        }
+    }
+
+    // 3. Hojas: Literales numéricos o Identificadores
+    if (nodo->izq == NULL && nodo->der == NULL) {
+        // Caso literal numérico (TokenInt / TokenFloat)
+        if (lex == NULL || isdigit((unsigned char)lex[0]) ||
+            ((lex[0] == '-' || lex[0] == '+') && isdigit((unsigned char)lex[1]))) {
+            return processLiteral((int)nodo->valorNumerico);
+        }
+        // Caso literal carácter 'a'
+        if (lex[0] == '\'' && strlen(lex) >= 3) {
+            return processLiteral((int)lex[1]);
+        }
+        // Caso identificador (variable)
+        return processId(lex);
+    }
+
+    // 4. Operadores unarios prefijo ("unario:-", "unario:+", "unario:!", "unario:~")
+    if (nodo->izq != NULL && nodo->der == NULL && lex && strncmp(lex, "unario:", 7) == 0) {
+        const char *opUnario = lex + 7;
+        ExprRec operando = evaluarExpresion(nodo->izq);
+
+        if (strcmp(opUnario, "+") == 0) {
+            return operando;
+        }
+        if (strcmp(opUnario, "-") == 0) {
+            // 0 - operando
+            ExprRec cero = processLiteral(0);
+            OpRec opSub;
+            strcpy(opSub.operador, "-");
+            return genInfix(cero, opSub, operando);
+        }
+        if (strcmp(opUnario, "!") == 0) {
+            ExprRec cero = processLiteral(0);
+            return genRelacional(operando, "==", cero);
+        }
+        if (strcmp(opUnario, "~") == 0) {
+            char arg[64];
+            obtenerOperando(operando, arg, sizeof(arg));
+            ExprRec res = {TempExpr, "temp_not", "", 0};
+            getTemp(res.direccion, sizeof(res.direccion));
+            generate("movl", arg, "%eax", NULL);
+            generate("notl", "%eax", NULL, NULL);
+            generate("movl", "%eax", res.direccion, NULL);
+            return res;
+        }
+    }
+
+    // 5. Operadores binarios (izq != NULL && der != NULL)
+    if (nodo->izq != NULL && nodo->der != NULL && lex != NULL) {
+        // 5A. Asignación simple: x = expr
+        if (strcmp(lex, "=") == 0) {
+            ExprRec destino = processId(nodo->izq->valorLexema);
+            ExprRec fuente = evaluarExpresion(nodo->der);
+            assignX86(destino.direccion, fuente);
+            return destino;
+        }
+
+        // 5B. Asignaciones compuestas: +=, -=, *=, /=, %=
+        if (strcmp(lex, "+=") == 0 || strcmp(lex, "-=") == 0 ||
+            strcmp(lex, "*=") == 0 || strcmp(lex, "/=") == 0 || strcmp(lex, "%=") == 0) {
+            ExprRec destino = processId(nodo->izq->valorLexema);
+            ExprRec derVal = evaluarExpresion(nodo->der);
+            OpRec opBase;
+            opBase.operador[0] = lex[0];
+            opBase.operador[1] = '\0';
+            ExprRec calc = genInfix(destino, opBase, derVal);
+            assignX86(destino.direccion, calc);
+            return destino;
+        }
+
+        // 5C. Evaluar ambos operandos
+        ExprRec e1 = evaluarExpresion(nodo->izq);
+        ExprRec e2 = evaluarExpresion(nodo->der);
+
+        // 5D. Aritméticos básicos (+, -, *, /, %) usando su genInfix()
+        if (strcmp(lex, "+") == 0 || strcmp(lex, "-") == 0 ||
+            strcmp(lex, "*") == 0 || strcmp(lex, "/") == 0 || strcmp(lex, "%") == 0) {
+            OpRec op;
+            strncpy(op.operador, lex, sizeof(op.operador) - 1);
+            op.operador[sizeof(op.operador) - 1] = '\0';
+            return genInfix(e1, op, e2);
+        }
+
+        // 5E. Relacionales e igualdad (==, !=, <, <=, >, >=)
+        if (strcmp(lex, "==") == 0 || strcmp(lex, "!=") == 0 ||
+            strcmp(lex, "<") == 0  || strcmp(lex, "<=") == 0 ||
+            strcmp(lex, ">") == 0  || strcmp(lex, ">=") == 0) {
+            return genRelacional(e1, lex, e2);
+        }
+    }
+
+    return vacio;
+}
+
+// Helper para recorrer listas de declaración (incluyendo "declaracion-multiple" y "lista-ids")
+void procesarDeclaracion(struct ASTNodo *nodo) {
+    if (!nodo || errorGeneracion) return;
+
+    // Si es una inicialización: nodoDeclaracionVariable con lexema "=" (izq: id, der: expr)[cite: 4]
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "=") == 0 && nodo->izq && nodo->der) {
+        ExprRec destino = processId(nodo->izq->valorLexema);
+        ExprRec valor = evaluarExpresion(nodo->der);
+        assignX86(destino.direccion, valor);
+        return;
+    }
+
+    // Si es un nodo "var-init" dentro de listaIds (izq contiene el nodo "=")[cite: 2]
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "var-init") == 0) {
+        procesarDeclaracion(nodo->izq);
+        return;
+    }
+
+    // Recorrer subramas de declaraciones múltiples ("declaracion-multiple", "lista-ids")[cite: 2, 3]
+    procesarDeclaracion(nodo->izq);
+    procesarDeclaracion(nodo->der);
+}
+
+// Calcula dinámicamente cuántos bytes de pila necesita la función
+int calcularEspacioPila(struct ASTNodo *nodoFuncion) {
+    int bytesLocales = nodoFuncion ? nodoFuncion->bytesLocales : 0;
+    // Sumamos un margen para temporales intermedios de expresiones complejas (ej. 64 bytes)
+    int total = bytesLocales + 64;
+    // Redondeo al siguiente múltiplo de 16 bytes (ABI x86-64 System V)
+    return ((total + 15) / 16) * 16;
+}
+
+void recorrerNodo(struct ASTNodo *nodo) {
+    if (!nodo || errorGeneracion) return;
+
+    switch (nodo->tipo) {
+        case nodoPrograma:
+            recorrerNodo(nodo->izq);
+            recorrerNodo(nodo->der);
+            break;
+
+        case nodoFuncion:
+
+            if (nodo->der == NULL) break;
+            offsetPilaActual = nodo->bytesLocales;
+            int espacioPila = calcularEspacioPila(nodo);
+
+            fprintf(archivoASM, "%s:\n", nodo->valorLexema);
+            generate("pushq", "%rbp", NULL, NULL);
+            generate("movq", "%rsp", "%rbp", NULL);
+
+            char subRsp[32];
+            snprintf(subRsp, sizeof(subRsp), "$%d", espacioPila);
+            generate("subq", subRsp, "%rsp", NULL);
+
+            recorrerNodo(nodo->der); // Cuerpo de la función
+
+            // Epílogo de respaldo por si la función es void o no tiene return explícito
+            generate("movq", "%rbp", "%rsp", NULL);
+            generate("popq", "%rbp", NULL, NULL);
+            generate("ret", NULL, NULL, NULL);
+            fprintf(archivoASM, "\n");
+            break;
+
+        case nodoBloqueCodigo:
+        case nodoRelleno:
+            recorrerNodo(nodo->izq);
+            recorrerNodo(nodo->der);
+            break;
+
+        case nodoDeclaracionVariable:
+            procesarDeclaracion(nodo);
+            break;
+
+        case nodoExpresion:
+        case nodoLlamadaFuncion:
+            // Caso especial: sentencia return expr; (lexema == "return", izq == expr)[cite: 3, 4]
+            if (nodo->valorLexema && strcmp(nodo->valorLexema, "return") == 0) {
+                if (nodo->izq != NULL) {
+                    ExprRec retVal = evaluarExpresion(nodo->izq);
+                    char retStr[64];
+                    obtenerOperando(retVal, retStr, sizeof(retStr));
+                    generate("movl", retStr, "%eax", NULL);
+                } else {
+                    generate("movl", "$0", "%eax", NULL);
+                }
+                generate("movq", "%rbp", "%rsp", NULL);
+                generate("popq", "%rbp", NULL, NULL);
+                generate("ret", NULL, NULL, NULL);
+            } else {
+                // Cualquier expresión suelta como sentencia (ej: x = x + 5; o printf(...);)[cite: 4]
+                evaluarExpresion(nodo);
+            }
+            break;
+
+        default:
+            recorrerNodo(nodo->izq);
+            recorrerNodo(nodo->der);
+            break;
+    }
+}
+
+void liberarSimbolos() {
+    for (int i = 0; i < totalHistoricoSimbolos; i++) {
+        if (historicoSimbolos[i] != NULL) {
+            free(historicoSimbolos[i]->lexema);
+            free(historicoSimbolos[i]->tipoDato);
+            free(historicoSimbolos[i]);
+            historicoSimbolos[i] = NULL;
+        }
+    }
+    totalHistoricoSimbolos = 0;
 }
