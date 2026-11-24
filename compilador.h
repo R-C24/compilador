@@ -73,20 +73,7 @@ typedef enum {
     nodoLlamadaFuncion
 } TipoNodo;
 
-struct ASTNodo {
-    TipoNodo tipo;
-    struct ASTNodo *izq;
-    struct ASTNodo *der;
-    char *valorLexema;
-    double valorNumerico;
-    int lineaAct;
-    int columnaAct;
-    RegistroSemantico *simbolo;
-    int bytesLocales;
-};
-
 int esTipoUsuario(char *s);
-void registrarTipoDeclarado(struct ASTNodo *n);
 
 struct ASTNodo* crearNodo(TipoNodo tipo, struct ASTNodo *izq, struct ASTNodo *der, char *lexema);
 
@@ -125,6 +112,18 @@ typedef struct {
 extern TablaSimbolos pilaTablas[MaxAmbitos];
 extern int topePila;
 extern char tipoActual[256];
+
+struct ASTNodo {
+    TipoNodo tipo;
+    struct ASTNodo *izq;
+    struct ASTNodo *der;
+    char *valorLexema;
+    double valorNumerico;
+    int lineaAct;
+    int columnaAct;
+    RegistroSemantico *simbolo;
+    int bytesLocales;
+};
 
 void inicializarPila();
 void pushAmbitoConContexto(const char *funcion, const char *parametros);
@@ -172,6 +171,8 @@ extern int contadorEtiquetas;
 extern int offsetPilaActual;
 
 extern int offsetFuncionActual;
+extern RegistroSemantico *historicoSimbolos[4096];
+extern int totalHistoricoSimbolos;
 
 extern FILE *archivoASM;
 extern int errorGeneracion;
@@ -200,7 +201,7 @@ void generate(const char *opcode, const char *arg1, const char *arg2, const char
 
 ExprRec genInfix(ExprRec e1, OpRec op, ExprRec e2);
 void assignX86(const char *objDir, ExprRec fuente);
-ExprRec processId(const char *lexema);
+ExprRec processIdNodo(struct ASTNodo *nodo);
 ExprRec processLiteral(int valor);
 void readId(ExprRec inVar);
 void writeExpr(ExprRec outExpr);
@@ -216,5 +217,8 @@ void recorrerNodo(struct ASTNodo *nodo);
 
 void liberarSimbolos();
 int calcularEspacioPila(struct ASTNodo *nodoFuncion);
+void emitirGlobalesAST(struct ASTNodo *nodo);
+
+ExprRec genIncDec(struct ASTNodo *operandoNodo, const char *op, int esPrefijo);
 
 #endif //COMPILADOR_H

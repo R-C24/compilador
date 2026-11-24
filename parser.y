@@ -13,8 +13,6 @@ extern FILE *yyin;
 extern int yyleng;
 extern const char *archivoFuente;
 
-int offsetFuncionActual = 0;
-
 void yyerror(const char *s);
 struct ASTNodo *crearNodoUnario(const char *op, struct ASTNodo *operando);
 
@@ -1022,8 +1020,11 @@ expresion:
         $$ = crearNodoUnario("*", $2);
          raizAST = $$;
     }
+    /* Prefijos */
     | TokenOpInc expresion %prec UNARIO {
-        $$ = crearNodoUnario($1.lexema, $2);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "unario:%s", $1.lexema); // lexema: "unario:++" o "unario:--"
+        $$ = crearNodo(nodoExpresion, $2, NULL, buf);
         raizAST = $$;
     }
     | TokenSizeof '(' tipoCast ')' {

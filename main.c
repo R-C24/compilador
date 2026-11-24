@@ -45,6 +45,7 @@ int offsetPilaActual = 0;
 FILE *archivoASM = NULL;
 int errorGeneracion = 0;
 
+int offsetFuncionActual = 0;
 RegistroSemantico *historicoSimbolos[4096];
 int totalHistoricoSimbolos = 0;
 
@@ -527,7 +528,9 @@ void inicializarPila() {
 
 // Agrega a la pila una nueva tabla de símbolos al entrar a un nuevo contexto
 void pushAmbitoConContexto(const char *funcion, const char *parametros) {
-    offsetFuncionActual = 0;
+    if (funcion != NULL) {
+        offsetFuncionActual = 0;
+    }
 
     if (topePila >= MaxAmbitos - 1) {
         fprintf(stderr, "Error: Desbordamiento de pila de ámbitos.\n");
@@ -1408,28 +1411,33 @@ void assignX86(const char *objDir, ExprRec fuente) {
     generate("movl", "%eax", objDir, NULL);
 }
 
-ExprRec processId(const char *lexema) {
+ExprRec processIdNodo(struct ASTNodo *nodo) {
     ExprRec e;
     e.kind = IdExpr;
     e.valor = 0;
 
-    RegistroSemantico *info = buscarSimbolo((char *)lexema);
+    RegistroSemantico *info = (nodo != NULL) ? nodo->simbolo : NULL;
+
     if (info != NULL) {
         strncpy(e.nombre, info->lexema, sizeof(e.nombre) - 1);
         e.nombre[sizeof(e.nombre) - 1] = '\0';
 
         if (info->nivelAmbito == 0) {
-            strncpy(e.direccion, info->lexema, sizeof(e.direccion) - 1);
+            // Variable global en sección .data
+            snprintf(e.direccion, sizeof(e.direccion), "%s(%%rip)", info->lexema);
+            e.direccion[sizeof(e.direccion) - 1] = '\0';
         } else {
+            // Variable local o parámetro en pila respecto a %rbp
             snprintf(e.direccion, sizeof(e.direccion), "-%d(%%rbp)", info->offset);
         }
     } else {
-        // Si por alguna razón no se encuentra, marcamos la bandera de error
-        fprintf(stderr, "Error en generación: identificador '%s' no resuelto.\n", lexema);
+        fprintf(stderr, "Error en generación: nodo sin símbolo anotado ('%s').\n",
+                (nodo && nodo->valorLexema) ? nodo->valorLexema : "desconocido");
         errorGeneracion = 1;
-        strncpy(e.nombre, lexema, sizeof(e.nombre) - 1);
-        strncpy(e.direccion, lexema, sizeof(e.direccion) - 1);
+        e.nombre[0] = '\0';
+        e.direccion[0] = '\0';
     }
+
     return e;
 }
 
@@ -1464,6 +1472,8 @@ void start(void) {
     fprintf(archivoASM, ".section .data\n");
     fprintf(archivoASM, "    fmt_in:  .string \"%%d\"\n");
     fprintf(archivoASM, "    fmt_out: .string \"%%d\\n\"\n");
+
+    emitirGlobalesAST(raizAST);
 
     fprintf(archivoASM, "\n.section .text\n");
     fprintf(archivoASM, ".globl main\n");
@@ -1580,7 +1590,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             struct ASTNodo *idNodo = (argVar->valorLexema && strcmp(argVar->valorLexema, "unario:&") == 0)
                                      ? argVar->izq : argVar;
             if (idNodo && idNodo->valorLexema) {
-                ExprRec var = processId(idNodo->valorLexema);
+                ExprRec var = processIdNodo(idNodo);
                 readId(var);
             }
             return vacio;
@@ -1599,12 +1609,23 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             return processLiteral((int)lex[1]);
         }
         // Caso identificador (variable)
-        return processId(lex);
+        return processIdNodo(nodo); 
+    }
+
+    // Postfijos
+    if (nodo->izq != NULL && nodo->der == NULL && lex && (strcmp(lex, "++") == 0 || strcmp(lex, "--") == 0)) {
+        return genIncDec(nodo->izq, lex, 0); // 0 = postfijo
     }
 
     // 4. Operadores unarios prefijo ("unario:-", "unario:+", "unario:!", "unario:~")
     if (nodo->izq != NULL && nodo->der == NULL && lex && strncmp(lex, "unario:", 7) == 0) {
         const char *opUnario = lex + 7;
+
+        // Prefijos
+        if (strcmp(opUnario, "++") == 0 || strcmp(opUnario, "--") == 0) {
+            return genIncDec(nodo->izq, opUnario, 1); // 1 = prefijo
+        }
+
         ExprRec operando = evaluarExpresion(nodo->izq);
 
         if (strcmp(opUnario, "+") == 0) {
@@ -1637,7 +1658,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
     if (nodo->izq != NULL && nodo->der != NULL && lex != NULL) {
         // 5A. Asignación simple: x = expr
         if (strcmp(lex, "=") == 0) {
-            ExprRec destino = processId(nodo->izq->valorLexema);
+            ExprRec destino = processIdNodo(nodo->izq);
             ExprRec fuente = evaluarExpresion(nodo->der);
             assignX86(destino.direccion, fuente);
             return destino;
@@ -1646,7 +1667,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
         // 5B. Asignaciones compuestas: +=, -=, *=, /=, %=
         if (strcmp(lex, "+=") == 0 || strcmp(lex, "-=") == 0 ||
             strcmp(lex, "*=") == 0 || strcmp(lex, "/=") == 0 || strcmp(lex, "%=") == 0) {
-            ExprRec destino = processId(nodo->izq->valorLexema);
+            ExprRec destino = processIdNodo(nodo->izq);
             ExprRec derVal = evaluarExpresion(nodo->der);
             OpRec opBase;
             opBase.operador[0] = lex[0];
@@ -1686,7 +1707,7 @@ void procesarDeclaracion(struct ASTNodo *nodo) {
 
     // Si es una inicialización: nodoDeclaracionVariable con lexema "=" (izq: id, der: expr)[cite: 4]
     if (nodo->valorLexema && strcmp(nodo->valorLexema, "=") == 0 && nodo->izq && nodo->der) {
-        ExprRec destino = processId(nodo->izq->valorLexema);
+        ExprRec destino = processIdNodo(nodo->izq);
         ExprRec valor = evaluarExpresion(nodo->der);
         assignX86(destino.direccion, valor);
         return;
@@ -1717,8 +1738,12 @@ void recorrerNodo(struct ASTNodo *nodo) {
 
     switch (nodo->tipo) {
         case nodoPrograma:
-            recorrerNodo(nodo->izq);
-            recorrerNodo(nodo->der);
+            if (nodo->izq && nodo->izq->tipo != nodoDeclaracionVariable) {
+                recorrerNodo(nodo->izq);
+            }
+            if (nodo->der && nodo->der->tipo != nodoDeclaracionVariable) {
+                recorrerNodo(nodo->der);
+            }
             break;
 
         case nodoFuncion:
@@ -1792,4 +1817,86 @@ void liberarSimbolos() {
         }
     }
     totalHistoricoSimbolos = 0;
+}
+
+// Genera código ensamblador para ++ / -- (prefijo y postfijo)
+ExprRec genIncDec(struct ASTNodo *operandoNodo, const char *op, int esPrefijo) {
+    ExprRec var = evaluarExpresion(operandoNodo);
+    const char *inst = (strcmp(op, "++") == 0) ? "addl" : "subl";
+
+    if (esPrefijo) {
+        // ++x o --x: modifica la variable primero y retorna la variable con su valor nuevo
+        generate(inst, "$1", var.direccion, NULL);
+        return var;
+    } else {
+        // x++ o x--: guarda el valor anterior en un temporal, modifica la variable, y retorna el temporal
+        ExprRec tempViejo;
+        tempViejo.kind = TempExpr;
+        tempViejo.valor = 0;
+        snprintf(tempViejo.nombre, sizeof(tempViejo.nombre), "temp_post");
+        getTemp(tempViejo.direccion, sizeof(tempViejo.direccion));
+
+        generate("movl", var.direccion, "%eax", NULL);
+        generate("movl", "%eax", tempViejo.direccion, NULL);
+        generate(inst, "$1", var.direccion, NULL);
+
+        return tempViejo;
+    }
+}
+
+// Recorre las declaraciones globales del AST y las emite en .section .data
+void emitirGlobalesAST(struct ASTNodo *nodo) {
+    if (!nodo) return;
+
+    // 1. Nivel raíz del programa: solo bajamos por nodos de programa y declaraciones globales
+    if (nodo->tipo == nodoPrograma) {
+        emitirGlobalesAST(nodo->izq);
+        emitirGlobalesAST(nodo->der);
+        return;
+    }
+
+    // Si es una función, no contiene declaraciones globales (sus variables son locales)
+    if (nodo->tipo == nodoFuncion) {
+        return;
+    }
+
+    // 2. Declaraciones globales (nodoDeclaracionVariable)
+        if (nodo->tipo == nodoDeclaracionVariable) {
+            const char *lex = nodo->valorLexema;
+
+            // Caso A: Contenedor "var-init" -> el nodo "=" está en nodo->izq
+            if (lex && strcmp(lex, "var-init") == 0 && nodo->izq) {
+                struct ASTNodo *asig = nodo->izq;
+                if (asig->izq && asig->izq->valorLexema) {
+                    const char *nombre = asig->izq->valorLexema;
+                    int valorInit = 0;
+                    if (asig->der && asig->der->izq == NULL && asig->der->der == NULL) {
+                        valorInit = (int)asig->der->valorNumerico;
+                    }
+                    fprintf(archivoASM, "    %s: .long %d\n", nombre, valorInit);
+                }
+                return;
+            }
+
+            // Caso B: Asignación directa en declaracionVariable (nodo "=")
+            if (lex && strcmp(lex, "=") == 0 && nodo->izq && nodo->izq->valorLexema) {
+                const char *nombre = nodo->izq->valorLexema;
+                int valorInit = 0;
+                if (nodo->der && nodo->der->izq == NULL && nodo->der->der == NULL) {
+                    valorInit = (int)nodo->der->valorNumerico;
+                }
+                fprintf(archivoASM, "    %s: .long %d\n", nombre, valorInit);
+                return;
+            }
+
+            // Caso C: Variable global sin inicialización ("var-simple")
+            if (lex && strcmp(lex, "var-simple") == 0 && nodo->izq && nodo->izq->valorLexema) {
+                fprintf(archivoASM, "    %s: .long 0\n", nodo->izq->valorLexema);
+                return;
+            }
+
+            // Caso D: Contenedores ("declaracion-multiple", "lista-ids")
+            emitirGlobalesAST(nodo->izq);
+            emitirGlobalesAST(nodo->der);
+        }
 }
