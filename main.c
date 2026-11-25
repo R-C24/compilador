@@ -11,6 +11,10 @@ int totalMacros = 0;
 
 TablaSimbolos pilaTablas[MaxAmbitos];
 int topePila = -1;
+int topeLoops = -1;
+char pilaBreak[MaxLoops][32];
+char pilaContinue[MaxLoops][32];
+
 
 char funcionActual[256] = "";
 int contextoImpreso = 0;
@@ -1194,6 +1198,10 @@ void registrarParametrosEnTabla(struct ASTNodo *nodo) {
     struct ASTNodo *idNodo = extraerNodoIdParametro(nodo);
     if (idNodo && idNodo->valorLexema) {
         validarYRegistrarSimbolo(idNodo->valorLexema, tipoParam, tipoParametro, idNodo->lineaAct, idNodo->columnaAct);
+        
+        RegistroSemantico *reg = buscarSimbolo(idNodo->valorLexema);
+        idNodo->simbolo = reg;
+        nodo->simbolo = reg;
     }
 }
 
@@ -1573,6 +1581,14 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
         return evaluarExpresion(nodo->izq);
     }
 
+    if (lex && strncmp(lex, "casteo", 6) == 0 && nodo->der != NULL) {
+        return evaluarExpresion(nodo->der);
+    }
+
+    if (lex && strcmp(lex, "sizeof") == 0) {
+        return processLiteral(4);
+    }
+
     // 2. Llamada a función (ej. printf / scanf o funciones propias)
     if (nodo->tipo == nodoLlamadaFuncion && lex) {
         if (strcmp(lex, "printf") == 0 && nodo->izq) {
@@ -1696,6 +1712,43 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             strcmp(lex, ">") == 0  || strcmp(lex, ">=") == 0) {
             return genRelacional(e1, lex, e2);
         }
+        if (strcmp(lex, "&&") == 0 || strcmp(lex, "||") == 0) {
+            char arg1[64], arg2[64];
+            obtenerOperando(e1, arg1, sizeof(arg1));
+            obtenerOperando(e2, arg2, sizeof(arg2));
+            ExprRec res = {TempExpr, "temp_log", "", 0};
+            getTemp(res.direccion, sizeof(res.direccion));
+
+            int idLog = contadorEtiquetas++;
+            char etiqCorto[32], etiqFin[32];
+            snprintf(etiqCorto, sizeof(etiqCorto), ".Llog_corto_%d", idLog);
+            snprintf(etiqFin, sizeof(etiqFin), ".Llog_fin_%d", idLog);
+
+            generate("movl", arg1, "%eax", NULL);
+            generate("cmpl", "$0", "%eax", NULL);
+            if (strcmp(lex, "&&") == 0) {
+                generate("je", etiqCorto, NULL, NULL); // Si e1 es falso, resultado es 0
+                generate("movl", arg2, "%eax", NULL);
+                generate("cmpl", "$0", "%eax", NULL);
+                generate("setne", "%al", NULL, NULL);
+                generate("movzbl", "%al", "%eax", NULL);
+                generate("jmp", etiqFin, NULL, NULL);
+                fprintf(archivoASM, "%s:\n", etiqCorto);
+                generate("movl", "$0", "%eax", NULL);
+            } else {
+                generate("jne", etiqCorto, NULL, NULL); // Si e1 es verdadero, resultado es 1
+                generate("movl", arg2, "%eax", NULL);
+                generate("cmpl", "$0", "%eax", NULL);
+                generate("setne", "%al", NULL, NULL);
+                generate("movzbl", "%al", "%eax", NULL);
+                generate("jmp", etiqFin, NULL, NULL);
+                fprintf(archivoASM, "%s:\n", etiqCorto);
+                generate("movl", "$1", "%eax", NULL);
+            }
+            fprintf(archivoASM, "%s:\n", etiqFin);
+            generate("movl", "%eax", res.direccion, NULL);
+            return res;
+        }
     }
 
     return vacio;
@@ -1703,25 +1756,35 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
 
 // Helper para recorrer listas de declaración (incluyendo "declaracion-multiple" y "lista-ids")
 void procesarDeclaracion(struct ASTNodo *nodo) {
-    if (!nodo || errorGeneracion) return;
+    if (!nodo || errorGeneracion) {
+        return;
+    }
+    char *lex = nodo->valorLexema;
+    if (!lex){
+        return;
+    }
 
-    // Si es una inicialización: nodoDeclaracionVariable con lexema "=" (izq: id, der: expr)[cite: 4]
-    if (nodo->valorLexema && strcmp(nodo->valorLexema, "=") == 0 && nodo->izq && nodo->der) {
+    if (strcmp(lex, "declaracion-multiple") == 0) {
+        // nodo->izq son los especificadores ("int", etc.): NO se evalúan como variables
+        procesarDeclaracion(nodo->der);
+        return;
+    }
+    if (strcmp(lex, "lista-ids") == 0) {
+        procesarDeclaracion(nodo->izq);
+        procesarDeclaracion(nodo->der);
+        return;
+    }
+    if (strcmp(lex, "var-init") == 0 || strcmp(lex, "var-init-bloque") == 0) {
+        // El nodo "=" está en nodo->izq
+        procesarDeclaracion(nodo->izq);
+        return;
+    }
+    if (strcmp(lex, "=") == 0 && nodo->izq && nodo->der) {
         ExprRec destino = processIdNodo(nodo->izq);
         ExprRec valor = evaluarExpresion(nodo->der);
         assignX86(destino.direccion, valor);
         return;
     }
-
-    // Si es un nodo "var-init" dentro de listaIds (izq contiene el nodo "=")[cite: 2]
-    if (nodo->valorLexema && strcmp(nodo->valorLexema, "var-init") == 0) {
-        procesarDeclaracion(nodo->izq);
-        return;
-    }
-
-    // Recorrer subramas de declaraciones múltiples ("declaracion-multiple", "lista-ids")[cite: 2, 3]
-    procesarDeclaracion(nodo->izq);
-    procesarDeclaracion(nodo->der);
 }
 
 // Calcula dinámicamente cuántos bytes de pila necesita la función
@@ -1746,7 +1809,7 @@ void recorrerNodo(struct ASTNodo *nodo) {
             }
             break;
 
-        case nodoFuncion:
+        case nodoFuncion: {
 
             if (nodo->der == NULL) break;
             offsetPilaActual = nodo->bytesLocales;
@@ -1768,7 +1831,7 @@ void recorrerNodo(struct ASTNodo *nodo) {
             generate("ret", NULL, NULL, NULL);
             fprintf(archivoASM, "\n");
             break;
-
+        }
         case nodoBloqueCodigo:
         case nodoRelleno:
             recorrerNodo(nodo->izq);
@@ -1780,6 +1843,18 @@ void recorrerNodo(struct ASTNodo *nodo) {
             break;
 
         case nodoExpresion:
+            if (nodo->valorLexema && strcmp(nodo->valorLexema, "break") == 0) {
+            if (topeLoops >= 0) {
+                generate("jmp", pilaBreak[topeLoops], NULL, NULL);
+            }
+            break;
+            }
+            if (nodo->valorLexema && strcmp(nodo->valorLexema, "continue") == 0) {
+                if (topeLoops >= 0 && pilaContinue[topeLoops][0] != '\0') {
+                    generate("jmp", pilaContinue[topeLoops], NULL, NULL);
+                }
+                break;
+            }
         case nodoLlamadaFuncion:
             // Caso especial: sentencia return expr; (lexema == "return", izq == expr)[cite: 3, 4]
             if (nodo->valorLexema && strcmp(nodo->valorLexema, "return") == 0) {
@@ -1798,6 +1873,21 @@ void recorrerNodo(struct ASTNodo *nodo) {
                 // Cualquier expresión suelta como sentencia (ej: x = x + 5; o printf(...);)[cite: 4]
                 evaluarExpresion(nodo);
             }
+            break;
+        case nodoCondicionIf:
+            genIf(nodo);
+            break;
+
+        case nodoLoopWhile:
+            genWhile(nodo);
+            break;
+
+        case nodoLoopDoWhile:
+            genDoWhile(nodo);
+            break;
+
+        case nodoLoopFor:
+            genFor(nodo);
             break;
 
         default:
@@ -1899,4 +1989,171 @@ void emitirGlobalesAST(struct ASTNodo *nodo) {
             emitirGlobalesAST(nodo->izq);
             emitirGlobalesAST(nodo->der);
         }
+}
+
+void pushLoop(const char *etiqBreak, const char *etiqContinue){
+    if (topeLoops < MaxLoops - 1) {
+        topeLoops++;
+        strncpy(pilaBreak[topeLoops], etiqBreak, 31);
+        pilaBreak[topeLoops][31] = '\0';
+        if (etiqContinue) {
+            strncpy(pilaContinue[topeLoops], etiqContinue, 31);
+            pilaContinue[topeLoops][31] = '\0';
+        } else {
+            pilaContinue[topeLoops][0] = '\0';
+        }
+    }
+}
+
+void popLoop(){
+    if (topeLoops >= 0) {
+        topeLoops--;
+    }
+}
+
+void saltarSiFalso(struct ASTNodo *condNodo, const char *etiquetaFalso){
+    if (!condNodo) {
+        return; 
+    }
+    ExprRec cond = evaluarExpresion(condNodo);
+    char condStr[64];
+    obtenerOperando(cond, condStr, sizeof(condStr));
+
+    generate("movl", condStr, "%eax", NULL);
+    generate("cmpl", "$0", "%eax", NULL);
+    generate("je", etiquetaFalso, NULL, NULL);
+}
+
+// Recorre recursivamente cualquier cadena de if / else if / else saltando a 'etiqFinGlobal' al terminar la rama verdadera
+void genIfCadena(struct ASTNodo *nodo, const char *etiqFinGlobal) {
+    if (!nodo || errorGeneracion) return;
+    const char *lex = nodo->valorLexema;
+    if (!lex || strcmp(lex, "if-error") == 0) return;
+
+    int id = contadorEtiquetas++;
+    char etiqFalso[32];
+    snprintf(etiqFalso, sizeof(etiqFalso), ".Lelse_%d", id);
+
+    // 1. Nodo simple: "if" o "else-if" (izq = condición, der = cuerpo)
+    if (strcmp(lex, "if") == 0 || strcmp(lex, "else-if") == 0) {
+        saltarSiFalso(nodo->izq, etiqFalso);
+        recorrerNodo(nodo->der);
+        generate("jmp", etiqFinGlobal, NULL, NULL);
+        fprintf(archivoASM, "%s:\n", etiqFalso);
+        return;
+    }
+
+    // 2. Nodo compuesto: "if-else", "if-elseif", "if-elseif-else" o "cadena-else-if"
+    //    nodo->izq es la rama (o subcadena) anterior; nodo->der es el siguiente else-if o el bloque else final
+    if (strcmp(lex, "if-else") == 0 || strcmp(lex, "if-elseif") == 0 ||
+        strcmp(lex, "if-elseif-else") == 0 || strcmp(lex, "cadena-else-if") == 0) {
+        genIfCadena(nodo->izq, etiqFinGlobal);
+
+        // Si nodo->der es otro condicional ("else-if" o "cadena-else-if"), seguimos encadenando;
+        // si es el bloque 'else' final (nodoBloqueCodigo, nodoExpresion, etc.), lo ejecutamos directamente
+        if (nodo->der && nodo->der->tipo == nodoCondicionIf) {
+            genIfCadena(nodo->der, etiqFinGlobal);
+        } else {
+            recorrerNodo(nodo->der);
+        }
+    }
+}
+
+void genIf(struct ASTNodo *nodo) {
+    if (!nodo || errorGeneracion) return;
+    int id = contadorEtiquetas++;
+    char etiqFinGlobal[32];
+    snprintf(etiqFinGlobal, sizeof(etiqFinGlobal), ".Lendif_%d", id);
+
+    genIfCadena(nodo, etiqFinGlobal);
+    fprintf(archivoASM, "%s:\n", etiqFinGlobal);
+}
+
+void genWhile(struct ASTNodo *nodo){
+    int id = contadorEtiquetas++;
+    char etiqInicio[32], etiqFin[32];
+    snprintf(etiqInicio, sizeof(etiqInicio), ".Lwhile_inicio_%d", id);
+    snprintf(etiqFin, sizeof(etiqFin), ".Lwhile_fin_%d", id);
+
+    pushLoop(etiqFin, etiqInicio);
+
+    fprintf(archivoASM, "%s:\n", etiqInicio);
+    saltarSiFalso(nodo->izq, etiqFin);
+    recorrerNodo(nodo->der);
+    generate("jmp", etiqInicio, NULL, NULL);
+    fprintf(archivoASM, "%s:\n", etiqFin);
+
+    popLoop();
+}
+
+void genDoWhile(struct ASTNodo *nodo){
+    int id = contadorEtiquetas++;
+    char etiqInicio[32], etiqCond[32], etiqFin[32];
+    snprintf(etiqInicio, sizeof(etiqInicio), ".Ldo_inicio_%d", id);
+    snprintf(etiqCond, sizeof(etiqCond), ".Ldo_cond_%d", id);
+    snprintf(etiqFin, sizeof(etiqFin), ".Ldo_fin_%d", id);
+
+    pushLoop(etiqFin, etiqCond);
+
+    fprintf(archivoASM, "%s:\n", etiqInicio);
+    recorrerNodo(nodo->izq); // Cuerpo primero
+
+    fprintf(archivoASM, "%s:\n", etiqCond);
+    if (nodo->der) {
+        ExprRec cond = evaluarExpresion(nodo->der);
+        char condStr[64];
+        obtenerOperando(cond, condStr, sizeof(condStr));
+        generate("movl", condStr, "%eax", NULL);
+        generate("cmpl", "$0", "%eax", NULL);
+        generate("jne", etiqInicio, NULL, NULL); // Si es != 0, repite
+    }
+    fprintf(archivoASM, "%s:\n", etiqFin);
+
+    popLoop();
+}
+
+void genFor(struct ASTNodo *nodo){
+    if (!nodo || (nodo->valorLexema && strcmp(nodo->valorLexema, "for-error") == 0)) {
+        return;
+    }
+
+    int id = contadorEtiquetas++;
+    char etiqCond[32], etiqInc[32], etiqFin[32];
+    snprintf(etiqCond, sizeof(etiqCond), ".Lfor_cond_%d", id);
+    snprintf(etiqInc, sizeof(etiqInc), ".Lfor_inc_%d", id);
+    snprintf(etiqFin, sizeof(etiqFin), ".Lfor_fin_%d", id);
+
+    struct ASTNodo *cabecera = nodo->izq;
+    struct ASTNodo *initNodo = cabecera ? cabecera->izq : NULL;
+    struct ASTNodo *condInc  = cabecera ? cabecera->der : NULL;
+    struct ASTNodo *condNodo = condInc ? condInc->izq : NULL;
+    struct ASTNodo *incNodo  = condInc ? condInc->der : NULL;
+
+    // 1. Inicialización
+    if (initNodo) {
+        recorrerNodo(initNodo);
+    }
+
+    pushLoop(etiqFin, etiqInc);
+
+    // 2. Evaluación de condición
+    fprintf(archivoASM, "%s:\n", etiqCond);
+    if (condNodo) {
+        saltarSiFalso(condNodo, etiqFin);
+    }
+
+    // 3. Cuerpo del for
+    recorrerNodo(nodo->der);
+
+    // 4. Incremento (aquí salta 'continue')
+    fprintf(archivoASM, "%s:\n", etiqInc);
+    if (incNodo) {
+        evaluarExpresion(incNodo);
+    }
+    generate("jmp", etiqCond, NULL, NULL);
+
+    // 5. Salida (aquí salta 'break')
+    fprintf(archivoASM, "%s:\n", etiqFin);
+
+    popLoop();
 }

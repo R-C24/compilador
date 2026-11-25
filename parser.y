@@ -41,7 +41,7 @@ struct ASTNodo *raizAST = NULL;
 %token <tokenInfo> TokenOpBits TokenOpIgualdad TokenOpDesplazamiento
 %token <tokenInfo> TokenOpAditivos TokenOpMultiplicativos TokenOpInc TokenError
 
-%type <nodo> tipoCast programa funcion retornar bloqueCodigo sentenciaBloque condicionIf loopWhile loopDoWhile loopFor inicializacionFor condicional elementoCase caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaDimensiones listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos especificadores listaIds elementoInit abrirAmbito cerrarAmbito cuerpoEstructura sentenciaSola punteros listaEnum
+%type <nodo> tipoCast programa funcion retornar bloqueCodigo sentenciaBloque condicionIf loopWhile loopDoWhile loopFor inicializacionFor condicional elementoCase caseSwitch listaCasos caso listaParametros parametro listaDeclaracionVariables declaracionVariable declaracionArrays listaDimensiones listaElementos elemento listaModificadores expresion listaArgumentosOpt listaArgumentos especificadores listaIds elementoInit abrirAmbito cerrarAmbito cuerpoEstructura sentenciaSola punteros listaEnum condicionElseIf
 
 %right '=' TokenOpAsignacion
 %right '?' ':'
@@ -52,6 +52,8 @@ struct ASTNodo *raizAST = NULL;
 %left TokenOpMultiplicativos '*'
 %right UNARIO
 %left TokenOpInc '[' ']' TokenFlecha '.'
+%nonassoc SIN_ELSE
+%nonassoc TokenElse
 
 /* Regla inicial */
 %start programa
@@ -235,7 +237,7 @@ sentenciaBloque:
 ;
 
 condicionIf:
-    TokenIf '(' expresion ')' cuerpoEstructura {
+    TokenIf '(' expresion ')' cuerpoEstructura %prec SIN_ELSE {
         $$ = crearNodo(nodoCondicionIf, $3, $5, "if");
         raizAST = $$;
     }
@@ -244,6 +246,18 @@ condicionIf:
         $$ = crearNodo(nodoCondicionIf, ifParcial, $7, "if-else");
         raizAST = $$;
     }
+    | TokenIf '(' expresion ')' cuerpoEstructura condicionElseIf %prec SIN_ELSE {
+        struct ASTNodo *ifParcial = crearNodo(nodoCondicionIf, $3, $5, "if");
+        $$ = crearNodo(nodoCondicionIf, ifParcial, $6, "if-elseif");
+        raizAST = $$;
+    }
+    | TokenIf '(' expresion ')' cuerpoEstructura condicionElseIf TokenElse cuerpoEstructura {
+        struct ASTNodo *ifParcial = crearNodo(nodoCondicionIf, $3, $5, "if");
+        struct ASTNodo *ifConElseIf = crearNodo(nodoCondicionIf, ifParcial, $6, "if-elseif");
+        $$ = crearNodo(nodoCondicionIf, ifConElseIf, $8, "if-elseif-else");
+        raizAST = $$;
+    }
+    /* Reglas de recuperación de errores */
     | TokenIf '(' expresion '{' abrirAmbito bloqueCodigo cerrarAmbito '}' {
         yyerror("se esperaba ')' antes del token '{'");
         yyerrok;
@@ -259,6 +273,18 @@ condicionIf:
     | TokenIf error '{' abrirAmbito bloqueCodigo cerrarAmbito '}' {
         yyerrok;
         $$ = crearNodo(nodoCondicionIf, NULL, $5, "if-error");
+        raizAST = $$;
+    }
+;
+
+condicionElseIf:
+    TokenElse TokenIf '(' expresion ')' cuerpoEstructura {
+        $$ = crearNodo(nodoCondicionIf, $4, $6, "else-if");
+        raizAST = $$;
+    }
+    | condicionElseIf TokenElse TokenIf '(' expresion ')' cuerpoEstructura {
+        struct ASTNodo *nuevoElseIf = crearNodo(nodoCondicionIf, $5, $7, "else-if");
+        $$ = crearNodo(nodoCondicionIf, $1, nuevoElseIf, "cadena-else-if");
         raizAST = $$;
     }
 ;

@@ -9,6 +9,7 @@
 #define MaxAmbitos 500 //FALTAN PRUEBAS DE ESTRES
 #define MaxArchivosIncluidos 64
 #define MaxProfundidadInclude 32
+#define MaxLoops 64
 
 typedef struct Macro Macro;
 struct Macro{
@@ -220,5 +221,18 @@ int calcularEspacioPila(struct ASTNodo *nodoFuncion);
 void emitirGlobalesAST(struct ASTNodo *nodo);
 
 ExprRec genIncDec(struct ASTNodo *operandoNodo, const char *op, int esPrefijo);
+
+extern char pilaBreak[MaxLoops][32];
+extern char pilaContinue[MaxLoops][32];
+extern int topeLoops;
+
+void pushLoop(const char *etiqBreak, const char *etiqContinue);
+void popLoop();
+void saltarSiFalso(struct ASTNodo *condNodo, const char *etiquetaFalso);
+void genIfCadena(struct ASTNodo *nodo, const char *etiqFinGlobal);
+void genIf(struct ASTNodo *nodo);
+void genWhile(struct ASTNodo *nodo);
+void genDoWhile(struct ASTNodo *nodo);
+void genFor(struct ASTNodo *nodo);
 
 #endif //COMPILADOR_H
