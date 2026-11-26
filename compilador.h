@@ -10,6 +10,7 @@
 #define MaxArchivosIncluidos 64
 #define MaxProfundidadInclude 32
 #define MaxLoops 64
+#define MaxString 128
 
 typedef struct Macro Macro;
 struct Macro{
@@ -175,6 +176,9 @@ extern int offsetFuncionActual;
 extern RegistroSemantico *historicoSimbolos[4096];
 extern int totalHistoricoSimbolos;
 
+extern const char *RegArgs32[6];
+extern const char *RegArgs64[6];
+
 extern FILE *archivoASM;
 extern int errorGeneracion;
 
@@ -195,6 +199,14 @@ typedef struct {
     char operador[16]; 
 } OpRec;
 
+typedef struct {
+    const struct ASTNodo *nodo;
+    char etiqueta[32];
+} LiteralCadena;
+
+extern LiteralCadena tablaCadenas[MaxString];
+extern int totalCadenas;
+
 int generarCodigo(struct ASTNodo *raiz, const char *rutaSalidaS);
 void start(void);
 void finish(struct ASTNodo *raiz);
@@ -211,7 +223,6 @@ void recorrerNodo(struct ASTNodo *nodo);
 ExprRec evaluarExpresion(struct ASTNodo *nodo);
 
 void obtenerOperando(ExprRec e, char *dest, size_t tam);
-ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2);
 ExprRec evaluarExpresion(struct ASTNodo *nodo);
 void procesarDeclaracion(struct ASTNodo *nodo);
 void recorrerNodo(struct ASTNodo *nodo);
@@ -234,5 +245,11 @@ void genIf(struct ASTNodo *nodo);
 void genWhile(struct ASTNodo *nodo);
 void genDoWhile(struct ASTNodo *nodo);
 void genFor(struct ASTNodo *nodo);
+ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2);
+
+void recolectarCadenasAST(struct ASTNodo *nodo);
+const char *obtenerEtiquetaCadena(const struct ASTNodo *nodo);
+int aplanarParametros(struct ASTNodo *nodo, struct ASTNodo **params, int maxParams);
+int aplanarArgumentos(struct ASTNodo *nodo, struct ASTNodo **args, int maxArgs);
 
 #endif //COMPILADOR_H

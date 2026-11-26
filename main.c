@@ -9,12 +9,17 @@
 Macro macros[MaxMacros];
 int totalMacros = 0;
 
+LiteralCadena tablaCadenas[MaxString];
+int totalCadenas = 0;
+
 TablaSimbolos pilaTablas[MaxAmbitos];
 int topePila = -1;
 int topeLoops = -1;
 char pilaBreak[MaxLoops][32];
 char pilaContinue[MaxLoops][32];
 
+const char *RegArgs32[6] = {"%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"};
+const char *RegArgs64[6] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 
 char funcionActual[256] = "";
 int contextoImpreso = 0;
@@ -1482,6 +1487,7 @@ void start(void) {
     fprintf(archivoASM, "    fmt_out: .string \"%%d\\n\"\n");
 
     emitirGlobalesAST(raizAST);
+    recolectarCadenasAST(raizAST);
 
     fprintf(archivoASM, "\n.section .text\n");
     fprintf(archivoASM, ".globl main\n");
@@ -1555,19 +1561,27 @@ ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2) {
     generate("movl", arg1, "%eax", NULL);
     generate("cmpl", arg2, "%eax", NULL);
 
-    const char *setInst = "sete";
-    if (strcmp(op, "==") == 0) setInst = "sete";
-    else if (strcmp(op, "!=") == 0) setInst = "setne";
-    else if (strcmp(op, "<") == 0)  setInst = "setl";
-    else if (strcmp(op, "<=") == 0) setInst = "setle";
-    else if (strcmp(op, ">") == 0)  setInst = "setg";
-    else if (strcmp(op, ">=") == 0) setInst = "setge";
+    if (strcmp(op, "==") == 0) {
+        generate("sete", "%al", NULL, NULL);
+    } else if (strcmp(op, "!=") == 0) {
+        generate("setne", "%al", NULL, NULL);
+    } else if (strcmp(op, "<") == 0) {
+        generate("setl", "%al", NULL, NULL);
+    } else if (strcmp(op, "<=") == 0) {
+        generate("setle", "%al", NULL, NULL);
+    } else if (strcmp(op, ">") == 0) {
+        generate("setg", "%al", NULL, NULL);
+    } else if (strcmp(op, ">=") == 0) {
+        generate("setge", "%al", NULL, NULL);
+    }
 
-    generate(setInst, "%al", NULL, NULL);
+    // Extender %al (8 bits) con ceros a %eax (32 bits) -> resultado exacto 0 o 1
     generate("movzbl", "%al", "%eax", NULL);
     generate("movl", "%eax", res.direccion, NULL);
+
     return res;
 }
+
 
 // Evalúa recursivamente un nodo de expresión y devuelve dónde quedó el resultado
 ExprRec evaluarExpresion(struct ASTNodo *nodo) {
@@ -1589,16 +1603,8 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
         return processLiteral(4);
     }
 
-    // 2. Llamada a función (ej. printf / scanf o funciones propias)
+    // 2. Llamada a función
     if (nodo->tipo == nodoLlamadaFuncion && lex) {
-        if (strcmp(lex, "printf") == 0 && nodo->izq) {
-            // Si el argumento es una lista ("arg"), el valor está en nodo->izq->der
-            struct ASTNodo *argVal = (nodo->izq->valorLexema && strcmp(nodo->izq->valorLexema, "arg") == 0)
-                                     ? nodo->izq->der : nodo->izq;
-            ExprRec val = evaluarExpresion(argVal);
-            writeExpr(val);
-            return vacio;
-        }
         if (strcmp(lex, "scanf") == 0 && nodo->izq) {
             struct ASTNodo *argVar = (nodo->izq->valorLexema && strcmp(nodo->izq->valorLexema, "arg") == 0)
                                      ? nodo->izq->der : nodo->izq;
@@ -1611,6 +1617,37 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             }
             return vacio;
         }
+
+        struct ASTNodo *args[16];
+        int numArgs = aplanarArgumentos(nodo->izq, args, 16);
+        ExprRec valsArgs[16];
+        int esCadena[16] = {0};
+
+        for (int i = 0; i < numArgs && i < 16; i++) {
+            if (args[i]->izq == NULL && args[i]->der == NULL &&
+                args[i]->valorLexema && args[i]->valorLexema[0] == '"') {
+                esCadena[i] = 1;
+            }
+            valsArgs[i] = evaluarExpresion(args[i]);
+        }
+
+        for (int i = 0; i < numArgs && i < 6; i++) {
+            char argStr[64];
+            obtenerOperando(valsArgs[i], argStr, sizeof(argStr));
+            if (esCadena[i]) {
+                generate("leaq", argStr, RegArgs64[i], NULL);
+            } else {
+                generate("movl", argStr, RegArgs32[i], NULL);
+            }
+        }
+
+        generate("movl", "$0", "%eax", NULL);
+        generate("call", lex, NULL, NULL);
+
+        ExprRec retTemp = {TempExpr, "temp_call", "", 0};
+        getTemp(retTemp.direccion, sizeof(retTemp.direccion));
+        generate("movl", "%eax", retTemp.direccion, NULL);
+        return retTemp;
     }
 
     // 3. Hojas: Literales numéricos o Identificadores
@@ -1623,6 +1660,12 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
         // Caso literal carácter 'a'
         if (lex[0] == '\'' && strlen(lex) >= 3) {
             return processLiteral((int)lex[1]);
+        }
+        if (lex[0] == '"') {
+            const char *etiq = obtenerEtiquetaCadena(nodo);
+            ExprRec strRec = {IdExpr, "str_lit", "", 0};
+            snprintf(strRec.direccion, sizeof(strRec.direccion), "%s(%%rip)", etiq ? etiq : "fmt_out");
+            return strRec;
         }
         // Caso identificador (variable)
         return processIdNodo(nodo); 
@@ -1693,11 +1736,49 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             return destino;
         }
 
-        // 5C. Evaluar ambos operandos
+        // 5C. Operador ternario: c ? a : b -> nodo->izq = c, nodo->der = nodo ":" (izq = a, der = b)
+        if (strcmp(lex, "?") == 0 && nodo->der != NULL) {
+            int idTern = contadorEtiquetas++;
+            char etiqFalso[32], etiqFin[32];
+            snprintf(etiqFalso, sizeof(etiqFalso), ".Ltern_falso_%d", idTern);
+            snprintf(etiqFin, sizeof(etiqFin), ".Ltern_fin_%d", idTern);
+
+            ExprRec res = {TempExpr, "temp_tern", "", 0};
+            getTemp(res.direccion, sizeof(res.direccion));
+
+            // 1. Evaluar condición c
+            ExprRec cond = evaluarExpresion(nodo->izq);
+            char condStr[64];
+            obtenerOperando(cond, condStr, sizeof(condStr));
+            generate("movl", condStr, "%eax", NULL);
+            generate("cmpl", "$0", "%eax", NULL);
+            generate("je", etiqFalso, NULL, NULL);
+
+            // 2. Rama verdadera (a = nodo->der->izq)
+            ExprRec valTrue = evaluarExpresion(nodo->der->izq);
+            char trueStr[64];
+            obtenerOperando(valTrue, trueStr, sizeof(trueStr));
+            generate("movl", trueStr, "%eax", NULL);
+            generate("movl", "%eax", res.direccion, NULL);
+            generate("jmp", etiqFin, NULL, NULL);
+
+            // 3. Rama falsa (b = nodo->der->der)
+            fprintf(archivoASM, "%s:\n", etiqFalso);
+            ExprRec valFalse = evaluarExpresion(nodo->der->der);
+            char falseStr[64];
+            obtenerOperando(valFalse, falseStr, sizeof(falseStr));
+            generate("movl", falseStr, "%eax", NULL);
+            generate("movl", "%eax", res.direccion, NULL);
+
+            fprintf(archivoASM, "%s:\n", etiqFin);
+            return res;
+        }
+
+        // 5D. Evaluar ambos operandos
         ExprRec e1 = evaluarExpresion(nodo->izq);
         ExprRec e2 = evaluarExpresion(nodo->der);
 
-        // 5D. Aritméticos básicos (+, -, *, /, %) usando su genInfix()
+        // 5E. Aritméticos básicos (+, -, *, /, %) usando su genInfix()
         if (strcmp(lex, "+") == 0 || strcmp(lex, "-") == 0 ||
             strcmp(lex, "*") == 0 || strcmp(lex, "/") == 0 || strcmp(lex, "%") == 0) {
             OpRec op;
@@ -1706,7 +1787,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             return genInfix(e1, op, e2);
         }
 
-        // 5E. Relacionales e igualdad (==, !=, <, <=, >, >=)
+        // 5F. Relacionales e igualdad (==, !=, <, <=, >, >=)
         if (strcmp(lex, "==") == 0 || strcmp(lex, "!=") == 0 ||
             strcmp(lex, "<") == 0  || strcmp(lex, "<=") == 0 ||
             strcmp(lex, ">") == 0  || strcmp(lex, ">=") == 0) {
@@ -1790,8 +1871,8 @@ void procesarDeclaracion(struct ASTNodo *nodo) {
 // Calcula dinámicamente cuántos bytes de pila necesita la función
 int calcularEspacioPila(struct ASTNodo *nodoFuncion) {
     int bytesLocales = nodoFuncion ? nodoFuncion->bytesLocales : 0;
-    // Sumamos un margen para temporales intermedios de expresiones complejas (ej. 64 bytes)
-    int total = bytesLocales + 64;
+    // Sumamos un margen para temporales intermedios de expresiones complejas 
+    int total = bytesLocales + 512;
     // Redondeo al siguiente múltiplo de 16 bytes (ABI x86-64 System V)
     return ((total + 15) / 16) * 16;
 }
@@ -1822,6 +1903,25 @@ void recorrerNodo(struct ASTNodo *nodo) {
             char subRsp[32];
             snprintf(subRsp, sizeof(subRsp), "$%d", espacioPila);
             generate("subq", subRsp, "%rsp", NULL);
+
+            struct ASTNodo *cabecera = nodo->izq;
+            struct ASTNodo *listaParams = cabecera ? cabecera->der : NULL;
+            struct ASTNodo *params[16];
+            int numParams = aplanarParametros(listaParams, params, 16);
+
+            for (int i = 0; i < numParams && i < 6; i++) {
+                struct ASTNodo *pNodo = params[i];
+                if (pNodo && pNodo->simbolo != NULL) {
+                    char destPila[32];
+                    snprintf(destPila, sizeof(destPila), "-%d(%%rbp)", pNodo->simbolo->offset);
+                    int esPtr = (pNodo->simbolo->tipoDato && strchr(pNodo->simbolo->tipoDato, '*') != NULL);
+                    if (esPtr) {
+                        generate("movq", RegArgs64[i], destPila, NULL);
+                    } else {
+                        generate("movl", RegArgs32[i], destPila, NULL);
+                    }
+                }
+            }
 
             recorrerNodo(nodo->der); // Cuerpo de la función
 
@@ -2156,4 +2256,56 @@ void genFor(struct ASTNodo *nodo){
     fprintf(archivoASM, "%s:\n", etiqFin);
 
     popLoop();
+}
+
+void recolectarCadenasAST(struct ASTNodo *nodo) {
+    if (!nodo) return;
+    if (nodo->tipo == nodoExpresion && nodo->izq == NULL && nodo->der == NULL &&
+        nodo->valorLexema && nodo->valorLexema[0] == '"') {
+        if (totalCadenas < MaxString) {
+            snprintf(tablaCadenas[totalCadenas].etiqueta, 32, ".Lstr_%d", totalCadenas);
+            tablaCadenas[totalCadenas].nodo = nodo;
+            fprintf(archivoASM, "    %s: .string %s\n",
+                    tablaCadenas[totalCadenas].etiqueta, nodo->valorLexema);
+            totalCadenas++;
+        }
+        return;
+    }
+    recolectarCadenasAST(nodo->izq);
+    recolectarCadenasAST(nodo->der);
+}
+
+const char *obtenerEtiquetaCadena(const struct ASTNodo *nodo) {
+    for (int i = 0; i < totalCadenas; i++) {
+        if (tablaCadenas[i].nodo == nodo) return tablaCadenas[i].etiqueta;
+    }
+    return NULL;
+}
+
+int aplanarParametros(struct ASTNodo *nodo, struct ASTNodo **params, int maxParams) {
+    if (!nodo) return 0;
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "lista-parametros") == 0) {
+        int n = aplanarParametros(nodo->izq, params, maxParams);
+        if (n < maxParams && nodo->der) params[n++] = nodo->der;
+        return n;
+    }
+    if (maxParams > 0) {
+        params[0] = nodo;
+        return 1;
+    }
+    return 0;
+}
+
+int aplanarArgumentos(struct ASTNodo *nodo, struct ASTNodo **args, int maxArgs) {
+    if (!nodo) return 0;
+    if (nodo->valorLexema && strcmp(nodo->valorLexema, "arg") == 0) {
+        int n = aplanarArgumentos(nodo->izq, args, maxArgs);
+        if (n < maxArgs && nodo->der) args[n++] = nodo->der;
+        return n;
+    }
+    if (maxArgs > 0) {
+        args[0] = nodo;
+        return 1;
+    }
+    return 0;
 }
