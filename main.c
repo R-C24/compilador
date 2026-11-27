@@ -1618,12 +1618,12 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             return vacio;
         }
 
-        struct ASTNodo *args[16];
-        int numArgs = aplanarArgumentos(nodo->izq, args, 16);
-        ExprRec valsArgs[16];
-        int esCadena[16] = {0};
+        struct ASTNodo *args[32];
+        int numArgs = aplanarArgumentos(nodo->izq, args, 32);
+        ExprRec valsArgs[32];
+        int esCadena[32] = {0};
 
-        for (int i = 0; i < numArgs && i < 16; i++) {
+        for (int i = 0; i < numArgs && i < 32; i++) {
             if (args[i]->izq == NULL && args[i]->der == NULL &&
                 args[i]->valorLexema && args[i]->valorLexema[0] == '"') {
                 esCadena[i] = 1;
@@ -1631,6 +1631,27 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             valsArgs[i] = evaluarExpresion(args[i]);
         }
 
+        int extraArgs = (numArgs > 6) ? (numArgs - 6) : 0;
+        int paddingAlineacion = (extraArgs % 2 != 0) ? 8 : 0;
+
+        if (paddingAlineacion > 0) {
+            generate("subq", "$8", "%rsp", NULL);
+        }
+
+        for (int i = numArgs - 1; i >= 6; i--) {
+            char argStr[64];
+            obtenerOperando(valsArgs[i], argStr, sizeof(argStr));
+            if (esCadena[i]) {
+                generate("leaq", argStr, "%rax", NULL);
+            } else if (valsArgs[i].kind == LiteralExpr) {
+                generate("movq", argStr, "%rax", NULL);   // Literal inmediato ($1, $2, $3) -> movq
+            } else {
+                generate("movslq", argStr, "%rax", NULL); // Variable o temporal (-4(%rbp)) -> movslq
+            }
+            generate("pushq", "%rax", NULL, NULL);
+        }
+        
+        
         for (int i = 0; i < numArgs && i < 6; i++) {
             char argStr[64];
             obtenerOperando(valsArgs[i], argStr, sizeof(argStr));
@@ -1643,6 +1664,14 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
 
         generate("movl", "$0", "%eax", NULL);
         generate("call", lex, NULL, NULL);
+
+        if (extraArgs > 0) {
+            int bytesLimpiar = (extraArgs * 8) + paddingAlineacion;
+            char cleanStr[32];
+            snprintf(cleanStr, sizeof(cleanStr), "$%d", bytesLimpiar);
+            generate("addq", cleanStr, "%rsp", NULL);
+        }
+    
 
         ExprRec retTemp = {TempExpr, "temp_call", "", 0};
         getTemp(retTemp.direccion, sizeof(retTemp.direccion));
@@ -1906,19 +1935,34 @@ void recorrerNodo(struct ASTNodo *nodo) {
 
             struct ASTNodo *cabecera = nodo->izq;
             struct ASTNodo *listaParams = cabecera ? cabecera->der : NULL;
-            struct ASTNodo *params[16];
-            int numParams = aplanarParametros(listaParams, params, 16);
+            struct ASTNodo *params[32];
+            int numParams = aplanarParametros(listaParams, params, 32);
 
-            for (int i = 0; i < numParams && i < 6; i++) {
+            for (int i = 0; i < numParams; i++) {
                 struct ASTNodo *pNodo = params[i];
                 if (pNodo && pNodo->simbolo != NULL) {
                     char destPila[32];
                     snprintf(destPila, sizeof(destPila), "-%d(%%rbp)", pNodo->simbolo->offset);
                     int esPtr = (pNodo->simbolo->tipoDato && strchr(pNodo->simbolo->tipoDato, '*') != NULL);
-                    if (esPtr) {
-                        generate("movq", RegArgs64[i], destPila, NULL);
+                    
+                    if (i < 6) {
+                        if (esPtr) {
+                            generate("movq", RegArgs64[i], destPila, NULL);
+                        } else {
+                            generate("movl", RegArgs32[i], destPila, NULL);
+                        }
                     } else {
-                        generate("movl", RegArgs32[i], destPila, NULL);
+                        int offsetCaller = 16 + (i - 6) * 8;
+                        char srcCaller[32];
+                        snprintf(srcCaller, sizeof(srcCaller), "%d(%%rbp)", offsetCaller);
+
+                        if (esPtr) {
+                            generate("movq", srcCaller, "%rax", NULL);
+                            generate("movq", "%rax", destPila, NULL);
+                        } else {
+                            generate("movl", srcCaller, "%eax", NULL);
+                            generate("movl", "%eax", destPila, NULL);
+                        }
                     }
                 }
             }
