@@ -1420,6 +1420,7 @@ ExprRec genInfix(ExprRec e1, OpRec op, ExprRec e2) {
     res.kind = TempExpr;
     res.valor = 0;
     res.esFlotante = 0;
+    res.esPuntero = 0;
     snprintf(res.nombre, sizeof(res.nombre), "temp_%d", contadorTemporales + 1);
     getTemp(res.direccion, sizeof(res.direccion));
 
@@ -1470,6 +1471,7 @@ ExprRec processIdNodo(struct ASTNodo *nodo) {
     e.kind = IdExpr;
     e.valor = 0;
     e.esFlotante = 0;
+    e.esPuntero = 0;
 
     RegistroSemantico *info = (nodo != NULL) ? nodo->simbolo : NULL;
 
@@ -1524,6 +1526,7 @@ ExprRec processLiteral(int valor) {
     e.direccion[0] = '\0';
     e.valor = valor;
     e.esFlotante = 0;
+    e.esPuntero = 0;
     return e;
 }
 
@@ -1620,6 +1623,7 @@ ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2) {
     res.kind = TempExpr;
     res.valor = 0;
     res.esFlotante = 0;
+    res.esPuntero = 0;
     snprintf(res.nombre, sizeof(res.nombre), "temp_rel");
     getTemp(res.direccion, sizeof(res.direccion));
 
@@ -1651,7 +1655,7 @@ ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2) {
 
 // Evalúa recursivamente un nodo de expresión y devuelve dónde quedó el resultado
 ExprRec evaluarExpresion(struct ASTNodo *nodo) {
-    ExprRec vacio = {LiteralExpr, "", "$0", 0, 0};
+    ExprRec vacio = {LiteralExpr, "", "$0", 0, 0, 0};
     if (!nodo || errorGeneracion) return vacio;
 
     const char *lex = nodo->valorLexema;
@@ -1667,7 +1671,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             strcmp(nodo->izq->valorLexema, "int") == 0) {
             char arg[64];
             obtenerOperando(val, arg, sizeof(arg));
-            ExprRec resInt = {TempExpr, "temp_d2i", "", 0, 0};
+            ExprRec resInt = {TempExpr, "temp_d2i", "", 0, 0, 0};
             getTemp(resInt.direccion, sizeof(resInt.direccion));
             generate("movsd", arg, "%xmm0", NULL);
             generate("cvttsd2si", "%xmm0", "%eax", NULL);
@@ -1743,12 +1747,14 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
                     generate("movsd", argStr, regXmm, NULL);
                 }
             } else if (idxInt < 6) {
-                if (esCadena[i]) {
-                    generate("leaq", argStr, RegArgs64[idxInt++], NULL);
-                } else {
-                    generate("movl", argStr, RegArgs32[idxInt++], NULL);
-                }
-            }
+              if (esCadena[i]) {
+                  generate("leaq", argStr, RegArgs64[idxInt++], NULL);
+              } else if (valsArgs[i].esPuntero) {
+                  generate("movq", argStr, RegArgs64[idxInt++], NULL);
+              } else {
+                  generate("movl", argStr, RegArgs32[idxInt++], NULL);
+              }
+          }
         }
 
         char numXmmStr[16];
@@ -1800,7 +1806,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
         }
         if (lex[0] == '"') {
             const char *etiq = obtenerEtiquetaCadena(nodo);
-            ExprRec strRec = {IdExpr, "str_lit", "", 0, 0};
+            ExprRec strRec = {IdExpr, "str_lit", "", 0, 0, 0};
             snprintf(strRec.direccion, sizeof(strRec.direccion), "%s(%%rip)", etiq ? etiq : "fmt_out");
             return strRec;
         }
@@ -1837,11 +1843,34 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             }
             return genInfix(cero, opSub, operando);
         }
+        if (strcmp(opUnario, "&") == 0) {
+            ExprRec var = processIdNodo(nodo->izq);
+            ExprRec res = {TempExpr, "temp_addr", "", 0, 0, 0};
+            getTempFloat(res.direccion, sizeof(res.direccion)); // 8 bytes para puntero de 64 bits
+            generate("leaq", var.direccion, "%rax", NULL);
+            generate("movq", "%rax", res.direccion, NULL);
+            res.esPuntero = 1;
+            return res;
+        }
+        if (strcmp(opUnario, "*") == 0) {
+            // Lectura por desreferencia: *ptr
+            ExprRec ptr = evaluarExpresion(nodo->izq);
+            char ptrStr[64];
+            obtenerOperando(ptr, ptrStr, sizeof(ptrStr));
+
+            ExprRec res = {TempExpr, "temp_deref", "", 0, 0, 0};
+            getTemp(res.direccion, sizeof(res.direccion));
+            generate("movq", ptrStr, "%rax", NULL);
+            generate("movl", "(%rax)", "%eax", NULL);
+            generate("movl", "%eax", res.direccion, NULL);
+            res.esPuntero = 1;
+            return res;
+        }
         if (strcmp(opUnario, "!") == 0) {
             if (operando.esFlotante) {
                 char arg[64];
                 obtenerOperando(operando, arg, sizeof(arg));
-                ExprRec res = {TempExpr, "temp_not", "", 0, 0};
+                ExprRec res = {TempExpr, "temp_not", "", 0, 0, 0};
                 getTemp(res.direccion, sizeof(res.direccion));
                 generate("movsd", arg, "%xmm0", NULL);
                 generate("pxor", "%xmm1", "%xmm1", NULL); // 0.0 en xmm1
@@ -1857,7 +1886,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
         if (strcmp(opUnario, "~") == 0) {
             char arg[64];
             obtenerOperando(operando, arg, sizeof(arg));
-            ExprRec res = {TempExpr, "temp_not", "", 0, 0};
+            ExprRec res = {TempExpr, "temp_not", "", 0, 0, 0};
             getTemp(res.direccion, sizeof(res.direccion));
             generate("movl", arg, "%eax", NULL);
             generate("notl", "%eax", NULL, NULL);
@@ -1868,8 +1897,82 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
 
     // 5. Operadores binarios (izq != NULL && der != NULL)
     if (nodo->izq != NULL && nodo->der != NULL && lex != NULL) {
-        // 5A. Asignación simple: x = expr
+
+        // 5A. Operadores lógicos con cortocircuito real ("&&" y "||")
+        if (strcmp(lex, "&&") == 0 || strcmp(lex, "||") == 0) {
+            int idLbl = contadorEtiquetas++;
+            char lblCorto[64], lblFin[64];
+            snprintf(lblCorto, sizeof(lblCorto), ".L_sc_%d", idLbl);
+            snprintf(lblFin, sizeof(lblFin), ".L_sc_end_%d", idLbl);
+
+            ExprRec res = {TempExpr, "temp_log", "", 0, 0, 0};
+            getTemp(res.direccion, sizeof(res.direccion));
+
+            int esAnd = (strcmp(lex, "&&") == 0);
+
+            // 1. Evaluar únicamente el lado izquierdo
+            ExprRec izq = evaluarExpresion(nodo->izq);
+            char opIzq[64];
+            obtenerOperando(izq, opIzq, sizeof(opIzq));
+
+            if (izq.esFlotante) {
+                generate("movsd", opIzq, "%xmm0", NULL);
+                generate("pxor", "%xmm1", "%xmm1", NULL);
+                generate("ucomisd", "%xmm1", "%xmm0", NULL);
+            } else {
+                generate("movl", opIzq, "%eax", NULL);
+                generate("cmpl", "$0", "%eax", NULL);
+            }
+
+            // Salto de cortocircuito sin tocar nodo->der
+            if (esAnd) {
+                generate("je", lblCorto, NULL, NULL);   // izq == 0 -> falso inmediato
+            } else {
+                generate("jne", lblCorto, NULL, NULL);  // izq != 0 -> verdadero inmediato
+            }
+
+            // 2. Solo si no hubo cortocircuito, evaluar el lado derecho
+            ExprRec der = evaluarExpresion(nodo->der);
+            char opDer[64];
+            obtenerOperando(der, opDer, sizeof(opDer));
+
+            if (der.esFlotante) {
+                generate("movsd", opDer, "%xmm0", NULL);
+                generate("pxor", "%xmm1", "%xmm1", NULL);
+                generate("ucomisd", "%xmm1", "%xmm0", NULL);
+            } else {
+                generate("movl", opDer, "%eax", NULL);
+                generate("cmpl", "$0", "%eax", NULL);
+            }
+
+            generate("setne", "%al", NULL, NULL);
+            generate("movzbl", "%al", "%eax", NULL);
+            generate("movl", "%eax", res.direccion, NULL);
+            generate("jmp", lblFin, NULL, NULL);
+
+            // 3. Rama de cortocircuito
+            fprintf(archivoASM, "%s:\n", lblCorto);
+            generate("movl", esAnd ? "$0" : "$1", res.direccion, NULL);
+
+            // 4. Salida común
+            fprintf(archivoASM, "%s:\n", lblFin);
+            return res;
+        }
+
+        // 5B. Asignación simple: x = expr  o  *ptr = expr
         if (strcmp(lex, "=") == 0) {
+            if (nodo->izq && nodo->izq->valorLexema && strcmp(nodo->izq->valorLexema, "unario:*") == 0) {
+                ExprRec ptr = evaluarExpresion(nodo->izq->izq);
+                ExprRec fuente = evaluarExpresion(nodo->der);
+                char ptrStr[64], srcStr[64];
+                obtenerOperando(ptr, ptrStr, sizeof(ptrStr));
+                obtenerOperando(fuente, srcStr, sizeof(srcStr));
+
+                generate("movl", srcStr, "%edx", NULL);
+                generate("movq", ptrStr, "%rax", NULL);
+                generate("movl", "%edx", "(%rax)", NULL);
+                return fuente;
+            }
             RegistroSemantico *simDest = nodo->izq ? nodo->izq->simbolo : NULL;
             char dirDest[64];
             if (simDest) {
@@ -1884,7 +1987,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             ExprRec fuente = evaluarExpresion(nodo->der);
             assignX86(dirDest, simDest, fuente);
 
-            ExprRec resAsig = {IdExpr, "", "", 0, 0};
+            ExprRec resAsig = {IdExpr, "", "", 0, 0, 0};
             strncpy(resAsig.direccion, dirDest, sizeof(resAsig.direccion));
             if (simDest && simDest->tipoDato &&
                 (strstr(simDest->tipoDato, "float") != NULL || strstr(simDest->tipoDato, "double") != NULL)) {
@@ -1893,7 +1996,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             return resAsig;
         }
 
-        // 5B. Asignaciones compuestas: +=, -=, *=, /=, %=
+        // 5C. Asignaciones compuestas: +=, -=, *=, /=, %=
         if (strcmp(lex, "+=") == 0 || strcmp(lex, "-=") == 0 ||
             strcmp(lex, "*=") == 0 || strcmp(lex, "/=") == 0 || strcmp(lex, "%=") == 0) {
             RegistroSemantico *simDest = nodo->izq ? nodo->izq->simbolo : NULL;
@@ -1907,7 +2010,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
                 dirDest[sizeof(dirDest) - 1] = '\0';
             }
 
-            ExprRec valActual = processIdNodo(nodo->izq); // Si es float, lo promueve a double en temporal
+            ExprRec valActual = processIdNodo(nodo->izq);
             ExprRec derVal = evaluarExpresion(nodo->der);
 
             char opStr[2] = { lex[0], '\0' };
@@ -1928,22 +2031,28 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             return resAsig;
         }
 
-        // 5C. Operador ternario: c ? a : b -> nodo->izq = c, nodo->der = nodo ":" (izq = a, der = b)
+        // 5D. Operador ternario: c ? a : b
         if (strcmp(lex, "?") == 0 && nodo->der != NULL) {
             int idTern = contadorEtiquetas++;
             char etiqFalso[32], etiqFin[32];
             snprintf(etiqFalso, sizeof(etiqFalso), ".Ltern_falso_%d", idTern);
             snprintf(etiqFin, sizeof(etiqFin), ".Ltern_fin_%d", idTern);
 
-            ExprRec res = {TempExpr, "temp_tern", "", 0, 0};
+            ExprRec res = {TempExpr, "temp_tern", "", 0, 0, 0};
             getTemp(res.direccion, sizeof(res.direccion));
 
             // 1. Evaluar condición c
             ExprRec cond = evaluarExpresion(nodo->izq);
             char condStr[64];
             obtenerOperando(cond, condStr, sizeof(condStr));
-            generate("movl", condStr, "%eax", NULL);
-            generate("cmpl", "$0", "%eax", NULL);
+            if (cond.esFlotante) {
+                generate("movsd", condStr, "%xmm0", NULL);
+                generate("pxor", "%xmm1", "%xmm1", NULL);
+                generate("ucomisd", "%xmm1", "%xmm0", NULL);
+            } else {
+                generate("movl", condStr, "%eax", NULL);
+                generate("cmpl", "$0", "%eax", NULL);
+            }
             generate("je", etiqFalso, NULL, NULL);
 
             // 2. Rama verdadera (a = nodo->der->izq)
@@ -1966,11 +2075,11 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             return res;
         }
 
-        // 5D. Evaluar ambos operandos
+        // 5E. Evaluar ambos operandos (para operadores estrictos)
         ExprRec e1 = evaluarExpresion(nodo->izq);
         ExprRec e2 = evaluarExpresion(nodo->der);
 
-        // 5E. Aritméticos básicos (+, -, *, /, %) usando su genInfix()
+        // 5F. Aritméticos básicos (+, -, *, /, %)
         if (strcmp(lex, "+") == 0 || strcmp(lex, "-") == 0 ||
             strcmp(lex, "*") == 0 || strcmp(lex, "/") == 0 || strcmp(lex, "%") == 0) {
             if (e1.esFlotante || e2.esFlotante) {
@@ -1982,49 +2091,11 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             return genInfix(e1, op, e2);
         }
 
-        // 5F. Relacionales e igualdad (==, !=, <, <=, >, >=)
+        // 5G. Relacionales e igualdad (==, !=, <, <=, >, >=)
         if (strcmp(lex, "==") == 0 || strcmp(lex, "!=") == 0 ||
             strcmp(lex, "<") == 0  || strcmp(lex, "<=") == 0 ||
             strcmp(lex, ">") == 0  || strcmp(lex, ">=") == 0) {
             return genRelacional(e1, lex, e2);
-        }
-        
-        if (strcmp(lex, "&&") == 0 || strcmp(lex, "||") == 0) {
-            char arg1[64], arg2[64];
-            obtenerOperando(e1, arg1, sizeof(arg1));
-            obtenerOperando(e2, arg2, sizeof(arg2));
-            ExprRec res = {TempExpr, "temp_log", "", 0, 0};
-            getTemp(res.direccion, sizeof(res.direccion));
-
-            int idLog = contadorEtiquetas++;
-            char etiqCorto[32], etiqFin[32];
-            snprintf(etiqCorto, sizeof(etiqCorto), ".Llog_corto_%d", idLog);
-            snprintf(etiqFin, sizeof(etiqFin), ".Llog_fin_%d", idLog);
-
-            generate("movl", arg1, "%eax", NULL);
-            generate("cmpl", "$0", "%eax", NULL);
-            if (strcmp(lex, "&&") == 0) {
-                generate("je", etiqCorto, NULL, NULL); // Si e1 es falso, resultado es 0
-                generate("movl", arg2, "%eax", NULL);
-                generate("cmpl", "$0", "%eax", NULL);
-                generate("setne", "%al", NULL, NULL);
-                generate("movzbl", "%al", "%eax", NULL);
-                generate("jmp", etiqFin, NULL, NULL);
-                fprintf(archivoASM, "%s:\n", etiqCorto);
-                generate("movl", "$0", "%eax", NULL);
-            } else {
-                generate("jne", etiqCorto, NULL, NULL); // Si e1 es verdadero, resultado es 1
-                generate("movl", arg2, "%eax", NULL);
-                generate("cmpl", "$0", "%eax", NULL);
-                generate("setne", "%al", NULL, NULL);
-                generate("movzbl", "%al", "%eax", NULL);
-                generate("jmp", etiqFin, NULL, NULL);
-                fprintf(archivoASM, "%s:\n", etiqCorto);
-                generate("movl", "$1", "%eax", NULL);
-            }
-            fprintf(archivoASM, "%s:\n", etiqFin);
-            generate("movl", "%eax", res.direccion, NULL);
-            return res;
         }
     }
 
@@ -2269,6 +2340,7 @@ ExprRec genIncDec(struct ASTNodo *operandoNodo, const char *op, int esPrefijo) {
         tempViejo.kind = TempExpr;
         tempViejo.valor = 0;
         tempViejo.esFlotante = 0;
+        tempViejo.esPuntero = 0;
         snprintf(tempViejo.nombre, sizeof(tempViejo.nombre), "temp_post");
         getTemp(tempViejo.direccion, sizeof(tempViejo.direccion));
 
@@ -2614,7 +2686,7 @@ ExprRec genInfixFloat(ExprRec e1, const char *op, ExprRec e2) {
     obtenerOperando(d1, arg1, sizeof(arg1));
     obtenerOperando(d2, arg2, sizeof(arg2));
 
-    ExprRec res = {TempExpr, "temp_flt", "", 0, 1};
+    ExprRec res = {TempExpr, "temp_flt", "", 0, 1, 0};
     getTempFloat(res.direccion, sizeof(res.direccion));
 
     generate("movsd", arg1, "%xmm0", NULL);

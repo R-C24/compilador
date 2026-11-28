@@ -195,6 +195,7 @@ typedef struct {
     char direccion[64];
     int valor;
     int esFlotante;
+    int esPuntero;
 } ExprRec;
 
 typedef struct {
