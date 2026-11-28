@@ -11,6 +11,7 @@
 #define MaxProfundidadInclude 32
 #define MaxLoops 64
 #define MaxString 128
+#define MaxFloats 128
 
 typedef struct Macro Macro;
 struct Macro{
@@ -193,6 +194,7 @@ typedef struct {
     char nombre[64];
     char direccion[64];
     int valor;
+    int esFlotante;
 } ExprRec;
 
 typedef struct {
@@ -213,7 +215,7 @@ void finish(struct ASTNodo *raiz);
 void generate(const char *opcode, const char *arg1, const char *arg2, const char *res);
 
 ExprRec genInfix(ExprRec e1, OpRec op, ExprRec e2);
-void assignX86(const char *objDir, ExprRec fuente);
+void assignX86(const char *objDir, RegistroSemantico *simDest, ExprRec fuente);
 ExprRec processIdNodo(struct ASTNodo *nodo);
 ExprRec processLiteral(int valor);
 void readId(ExprRec inVar);
@@ -251,5 +253,21 @@ void recolectarCadenasAST(struct ASTNodo *nodo);
 const char *obtenerEtiquetaCadena(const struct ASTNodo *nodo);
 int aplanarParametros(struct ASTNodo *nodo, struct ASTNodo **params, int maxParams);
 int aplanarArgumentos(struct ASTNodo *nodo, struct ASTNodo **args, int maxArgs);
+
+// ------------- Flotantes -------------
+typedef struct {
+    const struct ASTNodo *nodo;
+    char etiqueta[32];
+} LiteralFlotante;
+
+extern LiteralFlotante tablaFlotantes[MaxFloats];
+extern int totalFlotantes;
+
+void recolectarFlotantesAST(struct ASTNodo *nodo);
+const char *obtenerEtiquetaFlotante(const struct ASTNodo *nodo);
+void getTempFloat(char *buf, size_t size);
+ExprRec asegurarDouble(ExprRec e);
+ExprRec genInfixFloat(ExprRec e1, const char *op, ExprRec e2);
+int esLiteralFlotanteNodo(const struct ASTNodo *nodo);
 
 #endif //COMPILADOR_H

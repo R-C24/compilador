@@ -12,6 +12,9 @@ int totalMacros = 0;
 LiteralCadena tablaCadenas[MaxString];
 int totalCadenas = 0;
 
+LiteralFlotante tablaFlotantes[MaxFloats];
+int totalFlotantes = 0;
+
 TablaSimbolos pilaTablas[MaxAmbitos];
 int topePila = -1;
 int topeLoops = -1;
@@ -602,8 +605,15 @@ RegistroSemantico* insertarSimbolo(char *lexema, char *tipoDato, CategoriaSimbol
 
     // Asignación automática de offset para variables locales y parámetros
     if (topePila > 0 && (categoria == tipoVariable || categoria == tipoParametro)) {
-        int tam = (strchr(tipoDato, '*') != NULL) ? 8 : 4;
-        offsetFuncionActual += tam;
+        int es8Bytes = (strchr(tipoDato, '*') != NULL || strstr(tipoDato, "double") != NULL);
+        if (es8Bytes) {
+            if (offsetFuncionActual % 8 != 0) {
+                offsetFuncionActual += (8 - (offsetFuncionActual % 8));
+            }
+            offsetFuncionActual += 8;
+        } else {
+            offsetFuncionActual += 4;
+        }
         nuevo->offset = offsetFuncionActual;
     } else {
         nuevo->offset = 0;
@@ -1409,6 +1419,7 @@ ExprRec genInfix(ExprRec e1, OpRec op, ExprRec e2) {
     ExprRec res;
     res.kind = TempExpr;
     res.valor = 0;
+    res.esFlotante = 0;
     snprintf(res.nombre, sizeof(res.nombre), "temp_%d", contadorTemporales + 1);
     getTemp(res.direccion, sizeof(res.direccion));
 
@@ -1416,10 +1427,40 @@ ExprRec genInfix(ExprRec e1, OpRec op, ExprRec e2) {
     return res;
 }
 
-void assignX86(const char *objDir, ExprRec fuente) {
+void assignX86(const char *objDir, RegistroSemantico *simDest, ExprRec fuente) {
     char temp[64];
     extractExpr(fuente, temp, sizeof(temp));
 
+    int destEsDouble = (simDest && simDest->tipoDato && strstr(simDest->tipoDato, "double") != NULL);
+    int destEsFloat  = (simDest && simDest->tipoDato && strcmp(simDest->tipoDato, "float") == 0);
+
+    if (destEsDouble || destEsFloat) {
+        // 1. Destino flotante (float o double): asegurar que la fuente esté en double (%xmm0)
+        ExprRec fDouble = asegurarDouble(fuente);
+        char srcFlt[64];
+        extractExpr(fDouble, srcFlt, sizeof(srcFlt));
+        generate("movsd", srcFlt, "%xmm0", NULL);
+
+        if (destEsFloat) {
+            // float en memoria ocupa 4 bytes (32 bits) -> convertir double a float
+            generate("cvtsd2ss", "%xmm0", "%xmm0", NULL);
+            generate("movss", "%xmm0", objDir, NULL);
+        } else {
+            // double en memoria ocupa 8 bytes (64 bits)
+            generate("movsd", "%xmm0", objDir, NULL);
+        }
+        return;
+    }
+
+    if (fuente.esFlotante) {
+        // 2. Destino entero (int) pero fuente flotante -> truncar double a int
+        generate("movsd", temp, "%xmm0", NULL);
+        generate("cvttsd2si", "%xmm0", "%eax", NULL);
+        generate("movl", "%eax", objDir, NULL);
+        return;
+    }
+
+    // 3. Caso original: destino int y fuente int (32 bits)
     generate("movl", temp, "%eax", NULL);
     generate("movl", "%eax", objDir, NULL);
 }
@@ -1428,12 +1469,18 @@ ExprRec processIdNodo(struct ASTNodo *nodo) {
     ExprRec e;
     e.kind = IdExpr;
     e.valor = 0;
+    e.esFlotante = 0;
 
     RegistroSemantico *info = (nodo != NULL) ? nodo->simbolo : NULL;
 
     if (info != NULL) {
         strncpy(e.nombre, info->lexema, sizeof(e.nombre) - 1);
         e.nombre[sizeof(e.nombre) - 1] = '\0';
+
+        if (info->tipoDato &&
+            (strstr(info->tipoDato, "float") != NULL || strstr(info->tipoDato, "double") != NULL)) {
+            e.esFlotante = 1;
+        }
 
         if (info->nivelAmbito == 0) {
             // Variable global en sección .data
@@ -1443,6 +1490,22 @@ ExprRec processIdNodo(struct ASTNodo *nodo) {
             // Variable local o parámetro en pila respecto a %rbp
             snprintf(e.direccion, sizeof(e.direccion), "-%d(%%rbp)", info->offset);
         }
+
+        if (info->tipoDato &&
+            strcmp(info->tipoDato, "float") == 0) {
+            ExprRec tmpD;
+            tmpD.kind = TempExpr;
+            strncpy(tmpD.nombre, "temp_f2d", sizeof(tmpD.nombre) - 1);
+            tmpD.nombre[sizeof(tmpD.nombre) - 1] = '\0';
+            tmpD.valor = 0;
+            tmpD.esFlotante = 1;
+
+            getTempFloat(tmpD.direccion, sizeof(tmpD.direccion));
+            generate("cvtss2sd", e.direccion, "%xmm0", NULL);
+            generate("movsd", "%xmm0", tmpD.direccion, NULL);
+            return tmpD;
+        }
+
     } else {
         fprintf(stderr, "Error en generación: nodo sin símbolo anotado ('%s').\n",
                 (nodo && nodo->valorLexema) ? nodo->valorLexema : "desconocido");
@@ -1460,6 +1523,7 @@ ExprRec processLiteral(int valor) {
     e.nombre[0] = '\0';
     e.direccion[0] = '\0';
     e.valor = valor;
+    e.esFlotante = 0;
     return e;
 }
 
@@ -1488,6 +1552,7 @@ void start(void) {
 
     emitirGlobalesAST(raizAST);
     recolectarCadenasAST(raizAST);
+    recolectarFlotantesAST(raizAST);
 
     fprintf(archivoASM, "\n.section .text\n");
     fprintf(archivoASM, ".globl main\n");
@@ -1554,6 +1619,7 @@ ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2) {
     ExprRec res;
     res.kind = TempExpr;
     res.valor = 0;
+    res.esFlotante = 0;
     snprintf(res.nombre, sizeof(res.nombre), "temp_rel");
     getTemp(res.direccion, sizeof(res.direccion));
 
@@ -1585,7 +1651,7 @@ ExprRec genRelacional(ExprRec e1, const char *op, ExprRec e2) {
 
 // Evalúa recursivamente un nodo de expresión y devuelve dónde quedó el resultado
 ExprRec evaluarExpresion(struct ASTNodo *nodo) {
-    ExprRec vacio = {LiteralExpr, "", "$0", 0};
+    ExprRec vacio = {LiteralExpr, "", "$0", 0, 0};
     if (!nodo || errorGeneracion) return vacio;
 
     const char *lex = nodo->valorLexema;
@@ -1596,7 +1662,19 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
     }
 
     if (lex && strncmp(lex, "casteo", 6) == 0 && nodo->der != NULL) {
-        return evaluarExpresion(nodo->der);
+        ExprRec val = evaluarExpresion(nodo->der);
+        if (val.esFlotante && nodo->izq && nodo->izq->valorLexema &&
+            strcmp(nodo->izq->valorLexema, "int") == 0) {
+            char arg[64];
+            obtenerOperando(val, arg, sizeof(arg));
+            ExprRec resInt = {TempExpr, "temp_d2i", "", 0, 0};
+            getTemp(resInt.direccion, sizeof(resInt.direccion));
+            generate("movsd", arg, "%xmm0", NULL);
+            generate("cvttsd2si", "%xmm0", "%eax", NULL);
+            generate("movl", "%eax", resInt.direccion, NULL);
+            return resInt;
+        }
+        return val;
     }
 
     if (lex && strcmp(lex, "sizeof") == 0) {
@@ -1650,19 +1728,33 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             }
             generate("pushq", "%rax", NULL, NULL);
         }
+
+        int idxInt = 0;
+        int idxFlt = 0;
         
-        
-        for (int i = 0; i < numArgs && i < 6; i++) {
+        for (int i = 0; i < numArgs; i++) {
             char argStr[64];
             obtenerOperando(valsArgs[i], argStr, sizeof(argStr));
-            if (esCadena[i]) {
-                generate("leaq", argStr, RegArgs64[i], NULL);
-            } else {
-                generate("movl", argStr, RegArgs32[i], NULL);
+
+            if (valsArgs[i].esFlotante) {
+                if (idxFlt < 8) {
+                    char regXmm[16];
+                    snprintf(regXmm, sizeof(regXmm), "%%xmm%d", idxFlt++);
+                    generate("movsd", argStr, regXmm, NULL);
+                }
+            } else if (idxInt < 6) {
+                if (esCadena[i]) {
+                    generate("leaq", argStr, RegArgs64[idxInt++], NULL);
+                } else {
+                    generate("movl", argStr, RegArgs32[idxInt++], NULL);
+                }
             }
         }
 
-        generate("movl", "$0", "%eax", NULL);
+        char numXmmStr[16];
+        snprintf(numXmmStr, sizeof(numXmmStr), "$%d", idxFlt);
+
+        generate("movl", numXmmStr, "%eax", NULL);
         generate("call", lex, NULL, NULL);
 
         if (extraArgs > 0) {
@@ -1671,16 +1763,32 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             snprintf(cleanStr, sizeof(cleanStr), "$%d", bytesLimpiar);
             generate("addq", cleanStr, "%rsp", NULL);
         }
-    
+        
+        RegistroSemantico *simFunc = buscarSimbolo(lex);
+        int retornaFlotante = (simFunc && simFunc->tipoDato &&
+                               (strstr(simFunc->tipoDato, "float") != NULL ||
+                                strstr(simFunc->tipoDato, "double") != NULL));
 
-        ExprRec retTemp = {TempExpr, "temp_call", "", 0};
-        getTemp(retTemp.direccion, sizeof(retTemp.direccion));
-        generate("movl", "%eax", retTemp.direccion, NULL);
+        ExprRec retTemp = {TempExpr, "temp_call", "", 0, retornaFlotante};
+        if (retornaFlotante) {
+            getTempFloat(retTemp.direccion, sizeof(retTemp.direccion));
+            generate("movsd", "%xmm0", retTemp.direccion, NULL);
+        } else {
+            getTemp(retTemp.direccion, sizeof(retTemp.direccion));
+            generate("movl", "%eax", retTemp.direccion, NULL);
+        }
         return retTemp;
     }
 
     // 3. Hojas: Literales numéricos o Identificadores
     if (nodo->izq == NULL && nodo->der == NULL) {
+        // Caso literal flotante
+        if (esLiteralFlotanteNodo(nodo)) {
+            const char *etiq = obtenerEtiquetaFlotante(nodo);
+            ExprRec fRec = {IdExpr, "flt_lit", "", 0, 1};
+            snprintf(fRec.direccion, sizeof(fRec.direccion), "%s(%%rip)", etiq ? etiq : "fmt_flt");
+            return fRec;
+        }
         // Caso literal numérico (TokenInt / TokenFloat)
         if (lex == NULL || isdigit((unsigned char)lex[0]) ||
             ((lex[0] == '-' || lex[0] == '+') && isdigit((unsigned char)lex[1]))) {
@@ -1692,7 +1800,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
         }
         if (lex[0] == '"') {
             const char *etiq = obtenerEtiquetaCadena(nodo);
-            ExprRec strRec = {IdExpr, "str_lit", "", 0};
+            ExprRec strRec = {IdExpr, "str_lit", "", 0, 0};
             snprintf(strRec.direccion, sizeof(strRec.direccion), "%s(%%rip)", etiq ? etiq : "fmt_out");
             return strRec;
         }
@@ -1724,16 +1832,32 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             ExprRec cero = processLiteral(0);
             OpRec opSub;
             strcpy(opSub.operador, "-");
+            if (operando.esFlotante) {
+                return genInfixFloat(cero, opSub.operador, operando);
+            }
             return genInfix(cero, opSub, operando);
         }
         if (strcmp(opUnario, "!") == 0) {
+            if (operando.esFlotante) {
+                char arg[64];
+                obtenerOperando(operando, arg, sizeof(arg));
+                ExprRec res = {TempExpr, "temp_not", "", 0, 0};
+                getTemp(res.direccion, sizeof(res.direccion));
+                generate("movsd", arg, "%xmm0", NULL);
+                generate("pxor", "%xmm1", "%xmm1", NULL); // 0.0 en xmm1
+                generate("ucomisd", "%xmm1", "%xmm0", NULL);
+                generate("sete", "%al", NULL, NULL);
+                generate("movzbl", "%al", "%eax", NULL);
+                generate("movl", "%eax", res.direccion, NULL);
+                return res;
+            }
             ExprRec cero = processLiteral(0);
             return genRelacional(operando, "==", cero);
         }
         if (strcmp(opUnario, "~") == 0) {
             char arg[64];
             obtenerOperando(operando, arg, sizeof(arg));
-            ExprRec res = {TempExpr, "temp_not", "", 0};
+            ExprRec res = {TempExpr, "temp_not", "", 0, 0};
             getTemp(res.direccion, sizeof(res.direccion));
             generate("movl", arg, "%eax", NULL);
             generate("notl", "%eax", NULL, NULL);
@@ -1746,23 +1870,62 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
     if (nodo->izq != NULL && nodo->der != NULL && lex != NULL) {
         // 5A. Asignación simple: x = expr
         if (strcmp(lex, "=") == 0) {
-            ExprRec destino = processIdNodo(nodo->izq);
+            RegistroSemantico *simDest = nodo->izq ? nodo->izq->simbolo : NULL;
+            char dirDest[64];
+            if (simDest) {
+                if (simDest->nivelAmbito == 0) snprintf(dirDest, sizeof(dirDest), "%s(%%rip)", simDest->lexema);
+                else                           snprintf(dirDest, sizeof(dirDest), "-%d(%%rbp)", simDest->offset);
+            } else {
+                ExprRec tmp = processIdNodo(nodo->izq);
+                strncpy(dirDest, tmp.direccion, sizeof(dirDest));
+                dirDest[sizeof(dirDest) - 1] = '\0';
+            }
+
             ExprRec fuente = evaluarExpresion(nodo->der);
-            assignX86(destino.direccion, fuente);
-            return destino;
+            assignX86(dirDest, simDest, fuente);
+
+            ExprRec resAsig = {IdExpr, "", "", 0, 0};
+            strncpy(resAsig.direccion, dirDest, sizeof(resAsig.direccion));
+            if (simDest && simDest->tipoDato &&
+                (strstr(simDest->tipoDato, "float") != NULL || strstr(simDest->tipoDato, "double") != NULL)) {
+                resAsig.esFlotante = 1;
+            }
+            return resAsig;
         }
 
         // 5B. Asignaciones compuestas: +=, -=, *=, /=, %=
         if (strcmp(lex, "+=") == 0 || strcmp(lex, "-=") == 0 ||
             strcmp(lex, "*=") == 0 || strcmp(lex, "/=") == 0 || strcmp(lex, "%=") == 0) {
-            ExprRec destino = processIdNodo(nodo->izq);
+            RegistroSemantico *simDest = nodo->izq ? nodo->izq->simbolo : NULL;
+            char dirDest[64];
+            if (simDest) {
+                if (simDest->nivelAmbito == 0) snprintf(dirDest, sizeof(dirDest), "%s(%%rip)", simDest->lexema);
+                else                           snprintf(dirDest, sizeof(dirDest), "-%d(%%rbp)", simDest->offset);
+            } else {
+                ExprRec tmp = processIdNodo(nodo->izq);
+                strncpy(dirDest, tmp.direccion, sizeof(dirDest) - 1);
+                dirDest[sizeof(dirDest) - 1] = '\0';
+            }
+
+            ExprRec valActual = processIdNodo(nodo->izq); // Si es float, lo promueve a double en temporal
             ExprRec derVal = evaluarExpresion(nodo->der);
-            OpRec opBase;
-            opBase.operador[0] = lex[0];
-            opBase.operador[1] = '\0';
-            ExprRec calc = genInfix(destino, opBase, derVal);
-            assignX86(destino.direccion, calc);
-            return destino;
+
+            char opStr[2] = { lex[0], '\0' };
+            ExprRec calc;
+            if (valActual.esFlotante || derVal.esFlotante) {
+                calc = genInfixFloat(valActual, opStr, derVal);
+            } else {
+                OpRec opBase;
+                strcpy(opBase.operador, opStr);
+                calc = genInfix(valActual, opBase, derVal);
+            }
+
+            assignX86(dirDest, simDest, calc);
+
+            ExprRec resAsig = {IdExpr, "", "", 0, (valActual.esFlotante || derVal.esFlotante)};
+            strncpy(resAsig.direccion, dirDest, sizeof(resAsig.direccion) - 1);
+            resAsig.direccion[sizeof(resAsig.direccion) - 1] = '\0';
+            return resAsig;
         }
 
         // 5C. Operador ternario: c ? a : b -> nodo->izq = c, nodo->der = nodo ":" (izq = a, der = b)
@@ -1772,7 +1935,7 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             snprintf(etiqFalso, sizeof(etiqFalso), ".Ltern_falso_%d", idTern);
             snprintf(etiqFin, sizeof(etiqFin), ".Ltern_fin_%d", idTern);
 
-            ExprRec res = {TempExpr, "temp_tern", "", 0};
+            ExprRec res = {TempExpr, "temp_tern", "", 0, 0};
             getTemp(res.direccion, sizeof(res.direccion));
 
             // 1. Evaluar condición c
@@ -1810,6 +1973,9 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
         // 5E. Aritméticos básicos (+, -, *, /, %) usando su genInfix()
         if (strcmp(lex, "+") == 0 || strcmp(lex, "-") == 0 ||
             strcmp(lex, "*") == 0 || strcmp(lex, "/") == 0 || strcmp(lex, "%") == 0) {
+            if (e1.esFlotante || e2.esFlotante) {
+                return genInfixFloat(e1, lex, e2);
+            }
             OpRec op;
             strncpy(op.operador, lex, sizeof(op.operador) - 1);
             op.operador[sizeof(op.operador) - 1] = '\0';
@@ -1822,11 +1988,12 @@ ExprRec evaluarExpresion(struct ASTNodo *nodo) {
             strcmp(lex, ">") == 0  || strcmp(lex, ">=") == 0) {
             return genRelacional(e1, lex, e2);
         }
+        
         if (strcmp(lex, "&&") == 0 || strcmp(lex, "||") == 0) {
             char arg1[64], arg2[64];
             obtenerOperando(e1, arg1, sizeof(arg1));
             obtenerOperando(e2, arg2, sizeof(arg2));
-            ExprRec res = {TempExpr, "temp_log", "", 0};
+            ExprRec res = {TempExpr, "temp_log", "", 0, 0};
             getTemp(res.direccion, sizeof(res.direccion));
 
             int idLog = contadorEtiquetas++;
@@ -1885,14 +2052,43 @@ void procesarDeclaracion(struct ASTNodo *nodo) {
         return;
     }
     if (strcmp(lex, "var-init") == 0 || strcmp(lex, "var-init-bloque") == 0) {
-        // El nodo "=" está en nodo->izq
-        procesarDeclaracion(nodo->izq);
+        struct ASTNodo *asigNodo = nodo->izq; // Nodo "="
+        if (asigNodo && asigNodo->izq && asigNodo->der) {
+            struct ASTNodo *idNodo = asigNodo->izq;
+            RegistroSemantico *simDest = idNodo->simbolo;
+
+            char dirDest[64];
+            if (simDest) {
+                if (simDest->nivelAmbito == 0) snprintf(dirDest, sizeof(dirDest), "%s(%%rip)", simDest->lexema);
+                else                           snprintf(dirDest, sizeof(dirDest), "-%d(%%rbp)", simDest->offset);
+            } else {
+                ExprRec tmp = processIdNodo(idNodo);
+                strncpy(dirDest, tmp.direccion, sizeof(dirDest) - 1);
+                dirDest[sizeof(dirDest) - 1] = '\0';
+            }
+
+            ExprRec fuente = evaluarExpresion(asigNodo->der);
+            assignX86(dirDest, simDest, fuente);
+        }
         return;
     }
+    
     if (strcmp(lex, "=") == 0 && nodo->izq && nodo->der) {
-        ExprRec destino = processIdNodo(nodo->izq);
+        RegistroSemantico *simDest = nodo->izq->simbolo;
+        char dirDest[64];
+        if (simDest) {
+            if (simDest->nivelAmbito == 0) {
+                snprintf(dirDest, sizeof(dirDest), "%s(%%rip)", simDest->lexema);
+            } else {
+                snprintf(dirDest, sizeof(dirDest), "-%d(%%rbp)", simDest->offset);
+            }
+        } else {
+            ExprRec destino = processIdNodo(nodo->izq);
+            strncpy(dirDest, destino.direccion, sizeof(dirDest));
+            dirDest[sizeof(dirDest) - 1] = '\0';
+        }
         ExprRec valor = evaluarExpresion(nodo->der);
-        assignX86(destino.direccion, valor);
+        assignX86(dirDest, simDest, valor);
         return;
     }
 }
@@ -2006,7 +2202,12 @@ void recorrerNodo(struct ASTNodo *nodo) {
                     ExprRec retVal = evaluarExpresion(nodo->izq);
                     char retStr[64];
                     obtenerOperando(retVal, retStr, sizeof(retStr));
-                    generate("movl", retStr, "%eax", NULL);
+                    if (retVal.esFlotante) {
+                        generate("movsd", retStr, "%xmm0", NULL);
+                        generate("cvttsd2si", "%xmm0", "%eax", NULL);
+                    } else {
+                        generate("movl", retStr, "%eax", NULL);
+                    }
                 } else {
                     generate("movl", "$0", "%eax", NULL);
                 }
@@ -2067,6 +2268,7 @@ ExprRec genIncDec(struct ASTNodo *operandoNodo, const char *op, int esPrefijo) {
         ExprRec tempViejo;
         tempViejo.kind = TempExpr;
         tempViejo.valor = 0;
+        tempViejo.esFlotante = 0;
         snprintf(tempViejo.nombre, sizeof(tempViejo.nombre), "temp_post");
         getTemp(tempViejo.direccion, sizeof(tempViejo.direccion));
 
@@ -2352,4 +2554,84 @@ int aplanarArgumentos(struct ASTNodo *nodo, struct ASTNodo **args, int maxArgs) 
         return 1;
     }
     return 0;
+}
+
+void recolectarFlotantesAST(struct ASTNodo *nodo) {
+    if (!nodo) return;
+
+    if (esLiteralFlotanteNodo(nodo)) {
+        if (totalFlotantes < MaxFloats) {
+            snprintf(tablaFlotantes[totalFlotantes].etiqueta, 32, ".Lflt_%d", totalFlotantes);
+            tablaFlotantes[totalFlotantes].nodo = nodo;
+            fprintf(archivoASM, "    %s: .double %.17g\n",
+                    tablaFlotantes[totalFlotantes].etiqueta, nodo->valorNumerico);
+            totalFlotantes++;
+        }
+        return;
+    }
+    
+    recolectarFlotantesAST(nodo->izq);
+    recolectarFlotantesAST(nodo->der);
+}
+
+const char *obtenerEtiquetaFlotante(const struct ASTNodo *nodo) {
+    for (int i = 0; i < totalFlotantes; i++) {
+        if (tablaFlotantes[i].nodo == nodo) return tablaFlotantes[i].etiqueta;
+    }
+    return NULL;
+}
+
+void getTempFloat(char *buf, size_t size) {
+    // Alinear a 8 bytes antes de reservar
+    if (offsetPilaActual % 8 != 0) {
+        offsetPilaActual += (8 - (offsetPilaActual % 8));
+    }
+    offsetPilaActual += 8;
+    snprintf(buf, size, "-%d(%%rbp)", offsetPilaActual);
+}
+
+ExprRec asegurarDouble(ExprRec e) {
+    if (e.esFlotante) return e;
+    char arg[64];
+    obtenerOperando(e, arg, sizeof(arg));
+    ExprRec res = {TempExpr, "temp_i2d", "", 0, 1};
+    getTempFloat(res.direccion, sizeof(res.direccion));
+    if (e.kind == LiteralExpr) {
+        generate("movl", arg, "%eax", NULL);
+        generate("cvtsi2sd", "%eax", "%xmm0", NULL);
+    } else {
+        generate("cvtsi2sd", arg, "%xmm0", NULL);
+    }
+    generate("movsd", "%xmm0", res.direccion, NULL);
+    return res;
+}
+
+ExprRec genInfixFloat(ExprRec e1, const char *op, ExprRec e2) {
+    ExprRec d1 = asegurarDouble(e1);
+    ExprRec d2 = asegurarDouble(e2);
+    char arg1[64];
+    char arg2[64];
+    obtenerOperando(d1, arg1, sizeof(arg1));
+    obtenerOperando(d2, arg2, sizeof(arg2));
+
+    ExprRec res = {TempExpr, "temp_flt", "", 0, 1};
+    getTempFloat(res.direccion, sizeof(res.direccion));
+
+    generate("movsd", arg1, "%xmm0", NULL);
+    if (strcmp(op, "+") == 0)      generate("addsd", arg2, "%xmm0", NULL);
+    else if (strcmp(op, "-") == 0) generate("subsd", arg2, "%xmm0", NULL);
+    else if (strcmp(op, "*") == 0) generate("mulsd", arg2, "%xmm0", NULL);
+    else if (strcmp(op, "/") == 0) generate("divsd", arg2, "%xmm0", NULL);
+
+    generate("movsd", "%xmm0", res.direccion, NULL);
+    return res;
+}
+
+int esLiteralFlotanteNodo(const struct ASTNodo *nodo) {
+    if (!nodo || nodo->tipo != nodoExpresion || nodo->izq != NULL || nodo->der != NULL) return 0;
+    const char *lex = nodo->valorLexema;
+    if (!lex) return 0;
+    int i = (lex[0] == '-' || lex[0] == '+') ? 1 : 0;
+    if (!isdigit((unsigned char)lex[i]) && lex[i] != '.') return 0;
+    return (strchr(lex, '.') != NULL || strchr(lex, 'e') != NULL || strchr(lex, 'E') != NULL);
 }
